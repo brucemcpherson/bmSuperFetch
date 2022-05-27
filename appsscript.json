@@ -1,0 +1,24 @@
+{
+  "timeZone": "Europe/London",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dependencies": {
+    "libraries": [
+      {
+        "userSymbol": "bmDuster",
+        "libraryId": "1iBu-3kNBl2TKGeiQLKKDHte22dI0J9Z55SwYktpfbXCbxB0yrbG9ngC-",
+        "version": "3"
+      },
+      {
+        "userSymbol": "bmCachePoint",
+        "libraryId": "1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH",
+        "version": "2"
+      },
+      {
+        "userSymbol": "bmRottler",
+        "libraryId": "1dajqLysdKo8IoqddtEaGhtUUlSbtSQ1Agi2K5cXSUm0DxXfLYouSO9yD",
+        "version": "11"
+      }
+    ]
+  }
+}
