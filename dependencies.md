@@ -1,5 +1,5 @@
 # Google Apps Script Project: bmSuperFetch
-This repo (bmSuperFetch) was automatically updated on 5/27/2022, 2:53:22 PM by GasGit
+This repo (bmSuperFetch) was automatically updated on 5/31/2022, 12:46:36 PM by GasGit
 
 For more information on gasgit, see the [desktop liberation site](https://ramblings.mcpher.com/drive-sdk-and-github/migrategasgit/ "desktop liberation")
 
@@ -18,6 +18,14 @@ The shared link for [bmSuperFetch is here](https://script.google.com/d/1B2scq2fY
 appsscript| json
 SuperFetch| server_js
 Utils| server_js
+Plugins| server_js
+Iam| server_js
+Drv| server_js
+ContentTypes| server_js
+Cnv| server_js
+Gtb| server_js
+IdTokenService| server_js
+Frb| server_js
 ### Directly referenced libraries
 *library*|*identifier*|*key*|*version*|*dev mode*|*source*|
 --- | --- | --- | --- | --- | --- 
