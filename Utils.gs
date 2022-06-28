@@ -2,6 +2,32 @@ const Utils = (() => {
 
   const arrify = (item) => Array.isArray(item) ? item : (isNU(item) ? [] : [item])
 
+  /**
+   * [ { includes: { users: [Object] } },
+  { includes: { users: [Object] } },
+  { includes: { users: [Object] } } ]
+   becomes { includes : { users: [] }}
+   */
+  const consolidate = (expansions) => {
+
+    return expansions.reduce((p, c) => {
+
+      Object.keys(c).forEach(k => {
+        if (Array.isArray(c[k])) {
+          if (!p[k]) p[k] = []
+          Array.prototype.push.apply(p[k], c[k])
+        } else {
+          if (!p[k]) p[k] = {}
+          Object.keys(c[k]).forEach(t => {
+            if (!p[k][t]) p[k][t] = []
+            Array.prototype.push.apply(p[k][t], c[k][t])
+          })
+        }
+      })
+      return p
+    }, {})
+  }
+
   const encoder = (str) => {
     return encodeURIComponent(str)
   }
@@ -28,11 +54,16 @@ const Utils = (() => {
 
   const addParams = (params) => {
     params = arrify(params)
-    const pars = params.reduce((p, c) => {
+    const par = params.reduce((p, c) => {
       Object.keys(c).forEach(k => p.push([k, encoder(c[k])].join('=')))
       return p
     }, [])
-
+    // sort and remove dups
+    const pars = par.reverse().filter((f, i, a) => a.findIndex(g => f[0] === g[0]) === i).sort((a, b) => {
+      if (a[0] === b[0]) return 0
+      if (a[0] > b[0]) return 1
+      return -1
+    })
     return pars.length ? `?${pars.join('&')}` : ''
   }
 
@@ -91,7 +122,7 @@ const Utils = (() => {
   }
 
   // enhance the path with any additional path info
-  const makepath = ({ path, base }) => {
+  const makepath = ({ path = '', base = '' }) => {
     return `${singleSlash(base + ((path && base) ? '/' : '') + path)}`
   }
 
@@ -101,30 +132,38 @@ const Utils = (() => {
   }
 
 
+  const pager = (proxy, limit = { max: Infinity, start: 0, maxResults: 0 }) => {
 
-  const pager = (proxy) => {
-    const pager = (pageToken, items = []) => {
-      const result = proxy(pageToken)
-      if (!result.error) {
+    const localPager = (pageToken, items = [], expansions = []) => {
+      const result = proxy(pageToken, items)
+      if (!result.error && !result.cached) {
         Array.prototype.push.apply(items, result.data.items)
+        Array.prototype.push.apply(expansions, result.data.expansions)
       }
-      return {
+
+      const pack = {
         result,
-        items
+        items,
+        expansions
       }
+
+      return pack
     }
     // first call with no next pagetoken
-    let pack = pager()
-    let { cached } = pack.result
+    let pack = localPager()
+    if (pack.result.cached) return pack.result
+
     // keep going till we don't get a next page token
-    while (!pack.result.error && pack.result.data.nextPageToken) {
-      cached = cached && pack.result.cached
+    while (!pack.result.error && pack.result.data.nextPageToken && pack.items.length < limit.max) {
       const pageToken = pack.result.data.nextPageToken
-      pack = pager(pageToken, pack.items)
+      pack = localPager(pageToken, pack.items, pack.expansions)
     }
-    if (!pack.result.error) pack.result.data.items = pack.items
-    pack.result.cached = pack.result.cached && cached
-    return pack.result
+    const pr = pack.result
+    if (!pr.error) {
+      pr.data.items = pack.items
+      pr.data.expansions = pack.expansions
+    }
+    return pr
   }
 
   const makeThrow = (pack) => {
@@ -139,7 +178,9 @@ const Utils = (() => {
     return pack
   }
 
+
   return {
+
     makeThrow,
     chunker,
     encoder,
@@ -156,7 +197,8 @@ const Utils = (() => {
     makeUrl,
     pager,
     makeChunkIterator,
-    arrify
+    arrify,
+    consolidate
   }
 
 })()
