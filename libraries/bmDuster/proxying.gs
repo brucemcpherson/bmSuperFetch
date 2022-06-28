@@ -24,13 +24,16 @@ const _proxying = (() => {
    * @param {function} [params.missingPropAction] what to do if a missing property is called
    * @return {function} its the default function, but with all the properties of the originalObject 
    */
-  const _proxyDust = ({ originalObject, defaultMethod, missingPropAction = (prop) => {
-    throw new UnknownPropertyError(prop)
-  }, applyAction = (target, thisArg, ...args) => {
-    return target.apply(thisArg, ...args)
-  }, propAction = (target, prop, originalObject) => {
-    return originalObject[prop]
-  } }) => {
+  const _proxyDust = ({
+    originalObject,
+    defaultMethod,
+    missingPropAction = (target, prop, originalObject, receiver) => {
+      throw new UnknownPropertyError(prop)
+    }, applyAction = (target, thisArg, ...args) => {
+      return target.apply(thisArg, ...args)
+    }, propAction = (target, prop, originalObject, receiver) => {
+      return Reflect.get(originalObject, prop, receiver)
+    } }) => {
 
     // start with a default method - check it's a function
     _checkType({ item: defaultMethod, type: 'function', fail: true })
@@ -46,15 +49,15 @@ const _proxying = (() => {
 
     // make a proxy for the function to which we'll the originalObject
     const pust = new Proxy(defaultMethod, {
-      get(target, prop) {
+      get(target, prop, receiver) {
         // the property should exist in originalObject (not the default method)
         // so we just ignore the target typically
-        if (prop in originalObject) {
+        if (Reflect.has(originalObject, prop)) {
           // just return the value for the existing prop
-          return propAction(target, prop, originalObject)
+          return propAction(target, prop, originalObject, receiver)
         } else {
           // well that's a surprise
-          return missingPropAction(prop)
+          return missingPropAction(target, prop, originalObject, receiver)
         }
       },
       apply(target, thisArg, ...args) {
