@@ -136,8 +136,8 @@ class _DrvApi {
            * @param {...*} [params] any additional url params
            * @return {PackResponse} the list of matching items
            */
-          list: ({ query } = {}, ...params) =>  self.list({ path, query }, ...params),
-          
+          list: ({ query } = {}, ...params) => self.list({ path, query }, ...params),
+
           /**
            * download a file content from its path
            * @param {object} p
@@ -161,7 +161,7 @@ class _DrvApi {
            * @param {...*} params.params any additional url params
            * @return {PackResponse} the file metadata
            */
-          upload: ({ metadata, blob, createIfMissing = true }, ...params) => 
+          upload: ({ metadata, blob, createIfMissing = true }, ...params) =>
             self.upload({ path, metadata, blob, createIfMissing }, ...params),
 
         }
@@ -705,7 +705,8 @@ class _DrvApi {
             .concat(params)
             .concat(pageToken ? [{ pageToken }] : [])
         )
-      ))
+      )
+    )
   }
 
   /**
