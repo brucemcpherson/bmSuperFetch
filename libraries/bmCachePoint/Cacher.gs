@@ -76,17 +76,15 @@ class _Cacher {
     } = Compress.verifyKeys(digestedKey, JSON.parse(data))
 
     // if we have some children
+    const bits = keys.length ? this.cachePoint.getAll(keys) : {}
+
     chunk = keys.reduce((p, c) => {
-      if (p) {
-        const nextData = this.cachePoint.get(c)
-        // if any missing cache is broken so we can invalidate
-        if (!nextData) {
-          console(`warning: Missing cache entry ${c} for ${digestedKey} - invalidating cache entry`)
-          return null
-        }
-        return p += Compress.verifyKeys(digestedKey, JSON.parse(nextData)).chunk
+      const bit = bits[c]
+      if (!bit) {
+        console.log(`warning: Missing cache entry ${c} for ${digestedKey} - invalidating cache entry`)
+        return null
       }
-      return p
+      return p ?  p += Compress.verifyKeys(digestedKey, JSON.parse(bit)).chunk : null
     }, chunk)
 
     // finally decompress
@@ -121,9 +119,15 @@ class _Cacher {
     // compress the data
     const { parent, children } = Compress.keyChunks(digestedKey, data)
 
-    // we'll give the chunks a longer expiry in case the header disappearsfloor
-    children.forEach(f => this.cachePoint.put(f.key, JSON.stringify(f), expiry + 10))
-    
+    // put them all at once
+    if (children.length) {
+      const bits = children.reduce((p,c) => {
+        p[c.key] = JSON.stringify(c)
+        return p
+      } , {}) 
+      // we'll give the children a longer expiry in case the header disappears first
+      this.cachePoint.putAll(bits, expiry + 10)
+    }
     // write the header
     return this.cachePoint.put(digestedKey, JSON.stringify(parent), expiry)
 
@@ -134,7 +138,10 @@ class _Cacher {
    * @param {*} [options] any additional options to add to the key
    */
   remove(key, options) {
-    if (this.cachePoint) this.cachePoint.remove(this.keyer(key,options))
+    if (this.cachePoint) {
+      const digestedKey = this.keyer(key,options)
+      this.cachePoint.remove(digestedKey)
+    }
   }
 }
 var Cacher = _Cacher
