@@ -7,6 +7,7 @@ const Compress = (() => {
   const OVERHEAD = 40;
   const MINCHUNK = 100;
   const KEYLENGTH = 36 + 4;
+  const CACHEMAX = 100000
 
   /**
    *
@@ -33,10 +34,10 @@ const Compress = (() => {
   /**
    * if compressed string is too big, split into chunks
    * @param {object} obj b64 to compress
-   * @param {number} [number=100000] maxChunk
+   * @param {number} [number=CACHEMAX] maxChunk
    * @return {string]} compressed string or array of chunks of strings
    */
-  const compressChunks = (obj, maxChunk = 100000) => {
+  const compressChunks = (obj, maxChunk = CACHEMAX) => {
     // how much space we have for data
     const space = checkSpace(maxChunk)
 
