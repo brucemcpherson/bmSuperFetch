@@ -5,6 +5,7 @@
  * @property {function} tokenService the token service to return a an access token
  * @property {number} [expiry=60 * 60 * 1] default cache expiry
  * @property {string} [prefix='superfetch'] default usually it's just to separate cache entries if necessary
+ * @property {boolean} [missingPropertyIsFatal = true] proxy will throw if attempt to access a missing property
  * @property {Rottler} [rottler] rottler for throttling calls (https://ramblings.mcpher.com/vuejs-apps-script-add-ons/rate-limit/)
  */
 
@@ -37,6 +38,7 @@
  * @property {number} createdAt when this was created
  * @property {object||null} data parsed data
  * @property {boolean} parsed whether the data was parsed
+ * @property {string} url the url that generated this
  * @property {FakeHttpResponse} responsery to support getResponse queries when result came from cache
  * @property {FakeBlob} blobbery to recreate blobs when result came from cache
  */
@@ -49,6 +51,7 @@
  * @property {number} age age in ms of the cached data
  * @property {Blob|| null} blob the recreated blob if there was one
  * @property {boolean} parsed whether the data was parsed
+ * @property {string} url the url that provoked this entry
  * @property {FakeHttpResponse} response to support getResponse queries when result came from cache
  */
 
@@ -71,8 +74,17 @@
  * @property {function} throw a function to throw on error
  * @property {Error || string || null} the error if there was one
  * @property {number} responseCode the http response code 
+ * @property {string} url the url that provoked this response
+ * @property {string} pageToken optional restart point passed back in the page paramter
  */
 
+  /**
+   * This is used to control fetching limits
+   * @typedef SuperFetchPage
+   * @property {string} pageToken can be used to restart paging
+   * @property {number} max number to return - items are depaged up to this number
+   * @property {number} pageSize how many to get in one hit
+   */
 
 class _SuperFetch {
 
@@ -86,13 +98,15 @@ class _SuperFetch {
     tokenService,
     expiry = 60 * 60 * 1,
     prefix = 'superfetch',
-    rottler
+    rottler,
+    missingPropertyIsFatal = true
   }) {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
     this.tokenService = tokenService
-    this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix }),
-      this.rottler = rottler
+    this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
+    this.rottler = rottler
+    this.missingPropertyIsFatal = missingPropertyIsFatal
   }
 
   /**
@@ -103,11 +117,12 @@ class _SuperFetch {
    */
   cacheLumper(pack) {
     if (pack.error) return null
-
+    
     return {
       createdAt: new Date().getTime(),
       data: pack.data,
       parsed: pack.parsed,
+      url: pack.url,
       responsery: {
         responseCode: pack.response.getResponseCode(),
         headers: pack.response.getHeaders()
@@ -127,11 +142,16 @@ class _SuperFetch {
    * @return {CacheLumperResponse || null} ready to be written to cache
    */
   cacheUnLumper(pack, cached) {
-    if (!cached) return pack
-    const { data, blobbery, createdAt, parsed, responsery } = cached
+    // pack is mutable in this function - it fiddles with it rather than spreads it
+    if (!cached) {
+      pack.cached = false
+      return pack
+    }
+    const { data, blobbery, createdAt, parsed, responsery , url} = cached
 
     pack.cached = true
     pack.data = data ? data : null
+    pack.url = url
     pack.age = new Date().getTime() - createdAt
     pack.blob = blobbery ? new Utilities.newBlob(Utilities.base64Decode(blobbery.bytes), blobbery.contentType, blobbery.name) : null
     pack.parsed = parsed
@@ -163,7 +183,9 @@ class _SuperFetch {
     // these are the standard args to urlfetch
     let [url, options = {}] = args
     url = endPoint + url
-    if (showUrl) console.log(url)
+    if (showUrl) {
+      console.log(url)
+    }
 
     let { headers = {} } = options
     if (this.tokenService) headers.authorization = 'Bearer ' + this.tokenService()
@@ -189,7 +211,8 @@ class _SuperFetch {
       blob: null,
       age: null,
       cached: false,
-      responseCode: null
+      responseCode: null,
+      url
     }
 
     // unpack the caching overhead if there is any
@@ -227,8 +250,8 @@ class _SuperFetch {
         }
       } else {
         // it was an http error
-        pack.error =  pack.response.getContentText()
-      } 
+        pack.error = pack.response.getContentText()
+      }
 
       // if it was successful then write the response to cache for next time
       if (!pack.error && !noCache && getting) {
@@ -241,14 +264,21 @@ class _SuperFetch {
     return Utils.makeThrow(pack)
   }
 
-
   /**
    * makes a proxy to the fetcher
    */
   proxy(options = {}) {
+   
     return bmDuster.proxyDust({
       originalObject: this.fetcher,
       defaultMethod: this.fetcher.fetch,
+      missingPropAction: (target, prop, originalObject, receiver) => {
+        if (this.missingPropertyIsFatal) {
+          throw bmDuster.newUnknownPropertyError(prop)
+        }
+        console.log('Warning: Attempt to access non existent property in proxy', prop)
+        return Reflect.get(originalObject, prop, receiver)
+      },
       applyAction: (target, thisArg, ...args) => {
         if (this.rottler) this.rottler.rottle()
         return this._applyAction(target, thisArg, options, ...args)
@@ -260,11 +290,4 @@ class _SuperFetch {
 //export
 var SuperFetch = _SuperFetch
 
-// export libraries - could be handy
-
-var Libraries = {
-  bmDuster,
-  bmCachePoint,
-  bmRottler
-}
 
