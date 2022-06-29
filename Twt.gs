@@ -310,11 +310,11 @@ class _TwtApi {
     if (!page) page = {
       max: this.max
     }
-    const max = Math.min(this.maxChunk, Math.max(page.max - itemsSoFar, this.minChunk))
+    const max =  Math.max(page.max - itemsSoFar, this.minChunk)
 
     // pagesize needs to be a multiple of minChunk
     // set it to the nearest to max
-    const pageSize = Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk
+    const pageSize = Math.min(this.maxChunk , Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
     return {
       startToken: page.startToken,
       max,
@@ -382,6 +382,9 @@ class _TwtApi {
       const { key } = this.initializeQuery(options)
       this.superFetch.cacher.remove(key)
     }
+    return Utils.makeThrow({
+      cached: cacheable
+    })
   }
 
   _queryGet(options) {
