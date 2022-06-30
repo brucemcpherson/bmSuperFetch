@@ -53,17 +53,20 @@ const Utils = (() => {
   }, {})
 
   const addParams = (params) => {
-    params = arrify(params)
-    const par = params.reduce((p, c) => {
-      Object.keys(c).forEach(k => p.push([k, encoder(c[k])].join('=')))
+    params = arrify(params).flat(Infinity)
+    const pars = Array.from(params.flat(Infinity).reduce ((p,c)=> {
+      Object.keys(c).forEach(k=>p.push([k,encoder(c[k])]))
       return p
     }, [])
-    // sort and remove dups
-    const pars = par.reverse().filter((f, i, a) => a.findIndex(g => f[0] === g[0]) === i).sort((a, b) => {
+    .reverse()
+    .reduce ((p,c)=> {
+      p.set(c[0], c[1])
+      return p
+    }, new Map())).sort((a,b)=> {
       if (a[0] === b[0]) return 0
       if (a[0] > b[0]) return 1
       return -1
-    })
+    }).map(f=>f.join("="))
     return pars.length ? `?${pars.join('&')}` : ''
   }
 
