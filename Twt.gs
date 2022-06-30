@@ -51,34 +51,29 @@ class _TwtApi {
       ids: "",
       users: "/users"
     }
-    const joiner = " "
-    const paginate = true
-    const list = ['query']
+
     this.agenda = {
       get tweets() {
         const base = '/tweets'
+        const basic = {
+          joiner: " ",
+          list: ["query"],
+          paginate: true,
+          query: 'query'
+        }
         return {
           base,
           search: {
-            query: 'query',
-            path: `${base}/search/recent`,
-            joiner,
-            paginate,
-            list
+            ...basic,
+            path: `${base}/search/recent`
           },
           recent: {
-            query: 'query',
-            path: `${base}/search/recent`,
-            joiner,
-            paginate,
-            list
+            ...basic,
+            path: `${base}/search/recent`
           },
           all: {
-            query: 'query',
+            ...basic,
             path: `${base}/search/all`,
-            joiner,
-            paginate,
-            list
           },
           get: {
             query: 'ids',
@@ -86,32 +81,48 @@ class _TwtApi {
             joiner: ",",
             paginate: false,
             list: ['ids', 'query']
+          },
+          counts: {
+            ...basic,
+            paginate: false,
+            path: `${base}/counts/recent`
+          },
+          countsRecent: {
+            ...basic,
+            paginate: false,
+            path: `${base}/counts/recent`
+          },
+          countsAll: {
+            ...basic,
+            paginate: false,
+            path: `${base}/counts/all`
           }
         }
       },
       get users() {
         const base = "/users"
+        const basic = {
+          query: 'ids',
+          path: base,
+          joiner: ",",
+          paginate: false,
+          list: ['ids', 'query']
+        }
         return {
           base,
           get: {
-            query: 'ids',
-            path: base,
-            joiner: ",",
-            paginate: false,
-            list: ['ids', 'query']
+            ...basic
           },
           by: {
+            ...basic,
             query: 'usernames',
             path: `${base}/by`,
-            joiner: ",",
-            paginate: false,
             list: ['usernames', 'query']
           },
           me: {
+            ...basic,
             query: null,
             path: `${base}/me`,
-            joiner: "",
-            paginate: false,
             list: []
           },
           // TODO
@@ -235,6 +246,19 @@ class _TwtApi {
       }
     }
 
+    const countsClosure = ({ agenda, page, fields, query: extraQuery }) => {
+      return {
+        counts: (query, ...params) => rGet({
+          method: '_queryGet',
+          agenda,
+          query: self.makeTheQuery(agenda, Utils.arrify(extraQuery), Utils.arrify(query)),
+          params: Utils.arrify(fields).concat(params),
+          page
+        })
+      }
+    }
+
+
     const noMethod = (method) => {
       throw new Error(`method ${method} doesn't exist in this domain`)
     }
@@ -282,6 +306,7 @@ class _TwtApi {
     const rQuery = ({ fields, query, ids, usernames } = {}) => {
       return {
         ...searchClosure({ agenda: agenda.search, fields, query }),
+        ...countsClosure({ agenda: agenda.counts, fields, query }),
         ...getClosure({ fields, query, ids, usernames }),
         page: (page) => searchClosure({ agenda: agenda.search, page, fields, query }),
       }
@@ -289,6 +314,7 @@ class _TwtApi {
 
     return {
       ...searchClosure({ agenda: agenda.search }),
+      ...countsClosure({ agenda: agenda.counts }),
       ...getClosure(),
 
       page: (page) => searchClosure({ agenda: agenda.search, page }),
@@ -296,11 +322,17 @@ class _TwtApi {
       query: (options) => rQuery(options),
 
       get recent() {
-        return searchClosure({ agenda: agenda.recent })
+        return {
+          ...searchClosure({ agenda: agenda.recent }),
+          ...countsClosure({ agenda: agenda.countsRecent })
+        }
       },
 
       get all() {
-        return searchClosure({ agenda: agenda.all })
+        return {
+          ...searchClosure({ agenda: agenda.all }),
+          ...countsClosure({ agenda: agenda.countsAll })
+        }
       }
     }
   }
@@ -310,11 +342,11 @@ class _TwtApi {
     if (!page) page = {
       max: this.max
     }
-    const max =  Math.max(page.max - itemsSoFar, this.minChunk)
+    const max = Math.max(page.max - itemsSoFar, this.minChunk)
 
     // pagesize needs to be a multiple of minChunk
     // set it to the nearest to max
-    const pageSize = Math.min(this.maxChunk , Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
+    const pageSize = Math.min(this.maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
     return {
       startToken: page.startToken,
       max,
@@ -403,10 +435,10 @@ class _TwtApi {
 
       // we're done so add a throw method
       if (pack.cached) {
-        console.log(key, 'was cached')
+        if (this.showUrl)console.log(key, 'was cached')
         return Utils.makeThrow(pack)
       }
-      console.log(key, 'was not cached')
+      if (this.showUrl)console.log(key, 'was not cached')
     }
 
     // we'll need a noCache version of the proxy as we don't need to partially cache
@@ -442,7 +474,7 @@ class _TwtApi {
           Array.prototype.push.apply(pager.items, Utils.arrify(result.data.data))
           Array.prototype.push.apply(pager.expansions,
             Utils.arrify(Object.keys(result.data)
-              .filter(f => f != 'data' && f !== 'meta') 
+              .filter(f => f != 'data' && f !== 'meta')
               .reduce((p, c) => {
                 p[c] = result.data[c]
                 return p
