@@ -76,7 +76,18 @@
  * @property {number} responseCode the http response code 
  * @property {string} url the url that provoked this response
  * @property {string} pageToken optional restart point passed back in the page paramter
+ * @property {RateLimitInfo} rateLimit info about rate limit
  */
+
+  /**
+   * @typedef RateLimitInfo
+   * @property {number} limit the rate limit ceiling for that given endpoint
+   * @property {number} remaining the number of requests left for the 15-minute window
+   * @property {number} reset the remaining window before the rate limit resets in ms
+   * @property {boolean} fail whether this request failed because of rate limit stuff
+   * @property {number} waitFor how many ms to wait before retrying
+   */
+
 
   /**
    * This is used to control fetching limits
@@ -134,7 +145,15 @@ class _SuperFetch {
       } : null
     }
   }
-
+  /**
+   * @param {} params
+   * @param {function} params.informer how to add rate limit info to a pack
+   * @return self
+   */
+  setRateLimitInformer ({informer}) {
+    this.rateLimitInformer = informer
+    return this
+  }
   /**
    * this will unwrap a wrapperfor the cache entry
    * @param {}
@@ -156,7 +175,7 @@ class _SuperFetch {
     pack.blob = blobbery ? new Utilities.newBlob(Utilities.base64Decode(blobbery.bytes), blobbery.contentType, blobbery.name) : null
     pack.parsed = parsed
     pack.cached = Boolean(pack.cached)
-    pack.responseCode = responsery && responsery.responseCode
+    pack.responseCode = responsery && parseInt(responsery.responseCode, 10)
     // since there won't actually be a response object, we need to fake one
     pack.response = {
       getResponseCode: () => responsery && responsery.responseCode,
@@ -261,6 +280,9 @@ class _SuperFetch {
     }
 
     // add a throw method shortcut
+    if(this.rateLimitInformer) {
+      pack.rateLimit = this.rateLimitInformer(pack)
+    }
     return Utils.makeThrow(pack)
   }
 
