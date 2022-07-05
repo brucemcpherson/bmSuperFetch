@@ -52,9 +52,39 @@ const Utils = (() => {
     return p
   }, {})
 
-  const addParams = (params) => {
-    params = arrify(params).flat(Infinity)
-    const pars = Array.from(params.flat(Infinity).reduce ((p,c)=> {
+  /**
+   * some params go as regular url params ?id=x
+   * other are substitutes like this /:id/
+   */
+  const filterParams = (url, params) => {
+    const exploded = explodeParams (params)
+    // we'll pick up any params that are of this style :id
+    const matches = url.match(/:\w+/gi)
+
+    if (!matches || !matches.length) return {
+      url,
+      pars: exploded.map(f=>f.join("="))
+    }
+    const compareKey = (matchKey, explode) => matchKey === ':' + explode[0]
+
+    // check that we have them and make a new url
+    const pars = exploded.filter (e=> !matches.find(f=>compareKey(f, e))).map(f=>f.join("="))
+    const inline = exploded.filter (e=> matches.find(f=>compareKey(f, e)))
+
+    
+    matches.forEach(m=>{
+      const il = inline.find(f=>compareKey(m,f))
+      if (!il) throw new Error(`Couldnt find required inline parameter ${m}`)
+      url = url.replace(`${m}`,il[1])
+    })
+   
+    return {
+      url,
+      pars
+    }
+  }
+  const explodeParams = (params) => {
+    return Array.from(params.flat(Infinity).reduce ((p,c)=> {
       Object.keys(c).forEach(k=>p.push([k,encoder(c[k])]))
       return p
     }, [])
@@ -66,10 +96,14 @@ const Utils = (() => {
       if (a[0] === b[0]) return 0
       if (a[0] > b[0]) return 1
       return -1
-    }).map(f=>f.join("="))
-    return pars.length ? `?${pars.join('&')}` : ''
+    })
   }
 
+  const addParams = (params) => {
+    params = arrify(params).flat(Infinity)
+    const pars = explodeParams(params).map(f=>f.join("="))
+    return pars.length ? `?${pars.join('&')}` : ''
+  }
 
   const delay = (ms) => new Promise(resolve => {
     Utilities.sleep(ms)
@@ -131,7 +165,9 @@ const Utils = (() => {
 
   // create a URL with additional parameters
   const makeUrl = ({ url, params }) => {
-    return `${url}${Utils.addParams(params)}`
+    const {pars, url: patchedUrl} = filterParams(url, params)
+    const uriPars = pars.length ? `?${pars.join('&')}` : ''
+    return `${patchedUrl}${uriPars}`
   }
 
 
