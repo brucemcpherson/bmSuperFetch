@@ -27,9 +27,35 @@ class _TwtApi {
 
     // set by twitter API
     this.minChunk = 10
-    this.maxChunk = 100
 
     this.superFetch = superFetch
+
+    // add rate limit info to pack
+    const informer = (pack) => {
+      const headers = pack.response.getHeaders()
+
+      const limit = parseInt(headers['x-rate-limit-limit'], 10)
+      const remaining = parseInt(headers['x-rate-limit-remaining'], 10)
+      const reset = headers['x-rate-limit-reset'] * 1000
+      const fail = pack.error && pack.responseCode === 429
+      return {
+        // the rate limit ceiling for that given endpoint
+        limit,
+        // the number of requests left for the 15-minute window
+        remaining,
+        // the remaining window before the rate limit resets timestamp
+        reset,
+        // whether it failed because of a rate limit problem
+        fail,
+        // if failed, how long to wait before trying again
+        waitFor: !remaining ? reset - new Date().getTime() : 0
+      }
+    }
+    // tell superFetch how to do it
+    this.superFetch.setRateLimitInformer({
+      informer
+    })
+
     this.noCache = noCache
     this.extraParams = Utils.arrify(extraParams)
     this.showUrl = showUrl
@@ -59,7 +85,8 @@ class _TwtApi {
           joiner: " ",
           list: ["query"],
           paginate: true,
-          query: 'query'
+          query: 'query',
+          maxChunk: 100
         }
         return {
           base,
@@ -108,6 +135,14 @@ class _TwtApi {
           paginate: false,
           list: ['ids', 'query']
         }
+        const basicFollow = {
+          paginate: true,
+          joiner: "",
+          query: 'id',
+          list: ['query', 'id'],
+          path: `${base}/:id/following`,
+          maxChunk: 1000
+        }
         return {
           base,
           get: {
@@ -125,12 +160,20 @@ class _TwtApi {
             path: `${base}/me`,
             list: []
           },
-          // TODO
           following: {
-
+            ...basicFollow
           },
           followers: {
-
+            ...basicFollow,
+            path: `${base}/:id/followers`,
+          },
+          blocking: {
+            ...basicFollow,
+            path: `${base}/:id/blocking`,
+          },
+          muting: {
+            ...basicFollow,
+            path: `${base}/:id/muting`,
           }
         }
       }
@@ -263,7 +306,23 @@ class _TwtApi {
       throw new Error(`method ${method} doesn't exist in this domain`)
     }
 
-    const getClosure = ({ fields, query: extraQuery, ids: extraIds, usernames: extraUsernames } = {}) => {
+    const getClosuringId = ({ type, agenda, extraId, fields, page }) => {
+      const ob = {}
+      ob[type] = agenda[type] ? (id, ...params) => rGet({
+        method: '_queryGet',
+        agenda: agenda[type],
+        query: self.makeTheQuery(
+          agenda[type],
+          Utils.arrify(id),
+          Utils.arrify(extraId)
+        ),
+        params: Utils.arrify(fields).concat(params),
+        page
+      }) : noMethod('type')
+      return ob
+    }
+
+    const getClosure = ({ fields, query: extraQuery, ids: extraIds, usernames: extraUsernames, id: extraId, page } = {}) => {
       return {
         get: agenda.get ? (ids, ...params) => rGet({
           method: '_queryGet',
@@ -296,19 +355,27 @@ class _TwtApi {
             agenda.me
           ),
           params: Utils.arrify(fields).concat(params),
-        }) : () => noMethod('me')
+        }) : () => noMethod('me'),
+
+        ...getClosuringId({ type: 'muting', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'blocking', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'following', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'followers', agenda, extraId, fields, page })
       }
     }
 
     /**
       * generalized query 
      */
-    const rQuery = ({ fields, query, ids, usernames } = {}) => {
+    const rQuery = ({ fields, query, ids, usernames, id } = {}) => {
       return {
         ...searchClosure({ agenda: agenda.search, fields, query }),
         ...countsClosure({ agenda: agenda.counts, fields, query }),
-        ...getClosure({ fields, query, ids, usernames }),
-        page: (page) => searchClosure({ agenda: agenda.search, page, fields, query }),
+        ...getClosure({ fields, query, ids, usernames, id }),
+        page: (page) => ({
+          ...searchClosure({ agenda: agenda.search, page, fields, query }),
+          ...getClosure({ fields, query, id, page })
+        })
       }
     }
 
@@ -317,7 +384,12 @@ class _TwtApi {
       ...countsClosure({ agenda: agenda.counts }),
       ...getClosure(),
 
-      page: (page) => searchClosure({ agenda: agenda.search, page }),
+      page: (page) => {
+        return {
+          ...searchClosure({ agenda: agenda.search, page }),
+          ...getClosure({ page })
+        }
+      },
 
       query: (options) => rQuery(options),
 
@@ -337,7 +409,7 @@ class _TwtApi {
     }
   }
 
-  optimizePage(itemsSoFar = 0, page) {
+  optimizePage(maxChunk, itemsSoFar = 0, page) {
     // how many max to go for
     if (!page) page = {
       max: this.max
@@ -346,7 +418,7 @@ class _TwtApi {
 
     // pagesize needs to be a multiple of minChunk
     // set it to the nearest to max
-    const pageSize = Math.min(this.maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
+    const pageSize = Math.min(maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
     return {
       startToken: page.startToken,
       max,
@@ -387,7 +459,7 @@ class _TwtApi {
   }) {
 
     // make sure limit params are sensible
-    page = this.optimizePage(0, page)
+    page = this.optimizePage(agenda.maxChunk, 0, page)
 
     // add the query String
     params = params.concat(query)
@@ -419,6 +491,7 @@ class _TwtApi {
     })
   }
 
+
   _queryGet(options) {
     const self = this
 
@@ -435,10 +508,10 @@ class _TwtApi {
 
       // we're done so add a throw method
       if (pack.cached) {
-        if (this.showUrl)console.log(key, 'was cached')
+        if (this.showUrl) console.log(key, 'was cached')
         return Utils.makeThrow(pack)
       }
-      if (this.showUrl)console.log(key, 'was not cached')
+      if (this.showUrl) console.log(key, 'was not cached')
     }
 
     // we'll need a noCache version of the proxy as we don't need to partially cache
@@ -448,7 +521,7 @@ class _TwtApi {
 
     // it wasn't in cache, so we neeed a getter
     const getter = (pageToken, items) => {
-      const { pageSize } = this.optimizePage(items.length, page)
+      const { pageSize } = this.optimizePage(agenda.maxChunk, items.length, page)
       const mr = agenda.paginate ? [{
         max_results: pageSize
       }] : []
@@ -532,6 +605,7 @@ class _TwtApi {
     }
     return Utils.makeThrow(pr)
   }
+
 
 
   makePath({ path, params }) {
