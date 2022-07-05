@@ -29,6 +29,7 @@ class _Cacher {
   digester() {
     // conver args to an array and digest them
     const t = Array.prototype.slice.call(arguments).map(function (d) {
+      if(typeof d === typeof undefined) throw new Error('digester key component cant be undefined')
       return (Object(d) === d) ? JSON.stringify(d) : d.toString();
     }).join("-")
     const s = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_1, t, Utilities.Charset.UTF_8)
