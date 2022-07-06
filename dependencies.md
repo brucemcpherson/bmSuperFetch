@@ -1,5 +1,5 @@
 # Google Apps Script Project: bmSuperFetch
-This repo (bmSuperFetch) was automatically updated on 7/5/2022, 5:42:04 PM by GasGit
+This repo (bmSuperFetch) was automatically updated on 7/6/2022, 1:43:15 PM by GasGit
 
 For more information on gasgit, see the [desktop liberation site](https://ramblings.mcpher.com/drive-sdk-and-github/migrategasgit/ "desktop liberation")
 
@@ -31,13 +31,13 @@ Twt| server_js
 *library*|*identifier*|*key*|*version*|*dev mode*|*source*|
 --- | --- | --- | --- | --- | --- 
 bmDuster| bmDuster|1iBu-3kNBl2TKGeiQLKKDHte22dI0J9Z55SwYktpfbXCbxB0yrbG9ngC-|3|no|[here](libraries/bmDuster "library source")
-bmCachePoint| bmCachePoint|1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH|4|no|[here](libraries/bmCachePoint "library source")
+bmCachePoint| bmCachePoint|1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH|5|no|[here](libraries/bmCachePoint "library source")
 bmRottler| bmRottler|1dajqLysdKo8IoqddtEaGhtUUlSbtSQ1Agi2K5cXSUm0DxXfLYouSO9yD|11|no|[here](libraries/bmRottler "library source")
 ### All dependencies and sub dependencies
 *library*|*identifier*|*key*|*version*|*dev mode*|*source*|
 --- | --- | --- | --- | --- | --- 
 bmDuster| bmDuster|1iBu-3kNBl2TKGeiQLKKDHte22dI0J9Z55SwYktpfbXCbxB0yrbG9ngC-|3|no|[here](libraries/bmDuster "library source")
-bmCachePoint| bmCachePoint|1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH|4|no|[here](libraries/bmCachePoint "library source")
+bmCachePoint| bmCachePoint|1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH|5|no|[here](libraries/bmCachePoint "library source")
 bmRottler| bmRottler|1dajqLysdKo8IoqddtEaGhtUUlSbtSQ1Agi2K5cXSUm0DxXfLYouSO9yD|11|no|[here](libraries/bmRottler "library source")
 ### Enabled Google Services
 no libraries discovered
