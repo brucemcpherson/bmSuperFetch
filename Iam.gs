@@ -119,7 +119,8 @@ class _IamApi {
   }) {
     return Utils.makeUrl({
       url: `/projects/-/serviceAccounts/${serviceAccountEmail}:${type}`,
-      params: this.extraParams
+      params: this.extraParams,
+      skipSub: true
     })
   }
 
