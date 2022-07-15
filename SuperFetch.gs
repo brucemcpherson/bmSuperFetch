@@ -79,23 +79,23 @@
  * @property {RateLimitInfo} rateLimit info about rate limit
  */
 
-  /**
-   * @typedef RateLimitInfo
-   * @property {number} limit the rate limit ceiling for that given endpoint
-   * @property {number} remaining the number of requests left for the 15-minute window
-   * @property {number} reset the remaining window before the rate limit resets in ms
-   * @property {boolean} fail whether this request failed because of rate limit stuff
-   * @property {number} waitFor how many ms to wait before retrying
-   */
+/**
+ * @typedef RateLimitInfo
+ * @property {number} limit the rate limit ceiling for that given endpoint
+ * @property {number} remaining the number of requests left for the 15-minute window
+ * @property {number} reset the remaining window before the rate limit resets in ms
+ * @property {boolean} fail whether this request failed because of rate limit stuff
+ * @property {number} waitFor how many ms to wait before retrying
+ */
 
 
-  /**
-   * This is used to control fetching limits
-   * @typedef SuperFetchPage
-   * @property {string} pageToken can be used to restart paging
-   * @property {number} max number to return - items are depaged up to this number
-   * @property {number} pageSize how many to get in one hit
-   */
+/**
+ * This is used to control fetching limits
+ * @typedef SuperFetchPage
+ * @property {string} pageToken can be used to restart paging
+ * @property {number} max number to return - items are depaged up to this number
+ * @property {number} pageSize how many to get in one hit
+ */
 
 class _SuperFetch {
 
@@ -114,7 +114,7 @@ class _SuperFetch {
   }) {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
-    this.tokenService = tokenService
+    this.tokenService = tokenService 
     this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
@@ -128,7 +128,7 @@ class _SuperFetch {
    */
   cacheLumper(pack) {
     if (pack.error) return null
-    
+
     return {
       createdAt: new Date().getTime(),
       data: pack.data,
@@ -150,7 +150,7 @@ class _SuperFetch {
    * @param {function} params.informer how to add rate limit info to a pack
    * @return self
    */
-  setRateLimitInformer ({informer}) {
+  setRateLimitInformer({ informer }) {
     this.rateLimitInformer = informer
     return this
   }
@@ -166,7 +166,7 @@ class _SuperFetch {
       pack.cached = false
       return pack
     }
-    const { data, blobbery, createdAt, parsed, responsery , url} = cached
+    const { data, blobbery, createdAt, parsed, responsery, url } = cached
 
     pack.cached = true
     pack.data = data ? data : null
@@ -198,7 +198,7 @@ class _SuperFetch {
     noCache,
     showUrl
   } = {}, args) {
-
+    const self = this
     // these are the standard args to urlfetch
     let [url, options = {}] = args
     url = endPoint + url
@@ -207,7 +207,8 @@ class _SuperFetch {
     }
 
     let { headers = {} } = options
-    if (this.tokenService) headers.authorization = 'Bearer ' + this.tokenService()
+    if (self.tokenService) headers.authorization = 'Bearer ' + 
+      (typeof self.tokenService === 'function' ? self.tokenService() : self.tokenService)
     options = {
       ...options,
       headers,
@@ -219,7 +220,7 @@ class _SuperFetch {
     const getting = options.method.toLowerCase() === 'get'
 
     // lets see if we can get it from cache
-    const cached = !noCache && getting && this.cacher.get(url)
+    const cached = !noCache && getting && self.cacher.get(url)
 
     // we'll make a data packet of the response
     const pack = {
@@ -235,17 +236,17 @@ class _SuperFetch {
     }
 
     // unpack the caching overhead if there is any
-    this.cacheUnLumper(pack, cached)
+    self.cacheUnLumper(pack, cached)
 
     // if there was nothing cached, then call the api
     if (!pack.cached) {
       // we'll execute the thing and deal with the response
-      pack.response = target.apply(thisArg, [url, options])
+      pack.response = target.apply(self, [url, options])
       pack.responseCode = pack.response.getResponseCode()
 
       // if we're not caching always clean out the current cache
       // we won't bother removing any subsidiary records - they'lldie away anyway
-      if (noCache) this.cacher.remove(url)
+      if (noCache) self.cacher.remove(url)
 
       // see if it was successful
       if (Math.floor((1 + pack.responseCode) / 100) === 2) {
@@ -275,13 +276,13 @@ class _SuperFetch {
       // if it was successful then write the response to cache for next time
       if (!pack.error && !noCache && getting) {
         // write it to cache for next time
-        this.cacher.set(url, this.cacheLumper(pack))
+        self.cacher.set(url, self.cacheLumper(pack))
       }
     }
 
     // add a throw method shortcut
-    if(this.rateLimitInformer) {
-      pack.rateLimit = this.rateLimitInformer(pack)
+    if (self.rateLimitInformer) {
+      pack.rateLimit = self.rateLimitInformer(pack)
     }
     return Utils.makeThrow(pack)
   }
@@ -290,20 +291,20 @@ class _SuperFetch {
    * makes a proxy to the fetcher
    */
   proxy(options = {}) {
-   
+    const self = this
     return bmDuster.proxyDust({
-      originalObject: this.fetcher,
-      defaultMethod: this.fetcher.fetch,
+      originalObject: self.fetcher,
+      defaultMethod: self.fetcher.fetch,
       missingPropAction: (target, prop, originalObject, receiver) => {
-        if (this.missingPropertyIsFatal) {
+        if (self.missingPropertyIsFatal) {
           throw bmDuster.newUnknownPropertyError(prop)
         }
         console.log('Warning: Attempt to access non existent property in proxy', prop)
         return Reflect.get(originalObject, prop, receiver)
       },
       applyAction: (target, thisArg, ...args) => {
-        if (this.rottler) this.rottler.rottle()
-        return this._applyAction(target, thisArg, options, ...args)
+        if (self.rottler) self.rottler.rottle()
+        return self._applyAction(target, thisArg, options, ...args)
       }
     })
 
