@@ -5,7 +5,8 @@
  * @property {boolean} noCache whether to cache
  * @property {boolean} showUrl whether to showUrls when fetching
  * @property {object[]} extraParams always add these params
- * @property {number} max to get
+ * @property {number} max to 
+ * @property {number} maxWait maximum time to wait for a rate limit delay
  */
 
 class _TwtApi {
@@ -19,7 +20,9 @@ class _TwtApi {
       superFetch,
       showUrl = false,
       extraParams = [],
-      max = 100
+      max = 100,
+      //  6 minutes
+      maxWait = 60 * 6 * 1000
     } = {} = options
 
     // max number to get
@@ -27,6 +30,11 @@ class _TwtApi {
 
     // set by twitter API
     this.minChunk = 10
+
+    // max params in url
+    this.maxParams = 100
+
+    this.maxWait = maxWait
 
     this.superFetch = superFetch
 
@@ -308,6 +316,8 @@ class _TwtApi {
 
     const getClosuringId = ({ type, agenda, extraId, fields, page }) => {
       const ob = {}
+      if (!agenda[type]) return ob
+
       ob[type] = agenda[type] ? (id, ...params) => rGet({
         method: '_queryGet',
         agenda: agenda[type],
@@ -318,7 +328,7 @@ class _TwtApi {
         ),
         params: Utils.arrify(fields).concat(params),
         page
-      }) : noMethod('type')
+      }) : noMethod(type)
       return ob
     }
 
@@ -356,10 +366,9 @@ class _TwtApi {
           ),
           params: Utils.arrify(fields).concat(params),
         }) : () => noMethod('me'),
-
+        ...getClosuringId({ type: 'following', agenda, extraId, fields, page }),
         ...getClosuringId({ type: 'muting', agenda, extraId, fields, page }),
         ...getClosuringId({ type: 'blocking', agenda, extraId, fields, page }),
-        ...getClosuringId({ type: 'following', agenda, extraId, fields, page }),
         ...getClosuringId({ type: 'followers', agenda, extraId, fields, page })
       }
     }
@@ -412,18 +421,25 @@ class _TwtApi {
   optimizePage(maxChunk, itemsSoFar = 0, page) {
     // how many max to go for
     if (!page) page = {
-      max: this.max
+      max: this.max,
     }
+    const maxWait = Utils.isNU(page.maxWait) ? this.maxWait : page.maxWait
     const max = Math.max(page.max - itemsSoFar, this.minChunk)
-
+    
     // pagesize needs to be a multiple of minChunk
     // set it to the nearest to max
     const pageSize = Math.min(maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
+
     return {
       startToken: page.startToken,
       max,
-      pageSize
+      pageSize,
+      maxWait
     }
+  }
+
+  get chunkIterator() {
+    return (arr,size=this.maxParams) => Utils.chunkIt(arr,size)
   }
 
   makeListCacheKey({ url, page }) {
@@ -521,7 +537,7 @@ class _TwtApi {
 
     // it wasn't in cache, so we neeed a getter
     const getter = (pageToken, items) => {
-      const { pageSize } = this.optimizePage(agenda.maxChunk, items.length, page)
+      const { pageSize, maxWait } = this.optimizePage(agenda.maxChunk, items.length, page)
       const mr = agenda.paginate ? [{
         max_results: pageSize
       }] : []
@@ -530,7 +546,19 @@ class _TwtApi {
         path: initialPath,
         params: params.concat(mr, pageToken ? [{ pagination_token: pageToken }] : [])
       })
-      return ref.proxy(url)
+      const result = ref.proxy(url)
+      const { rateLimit } = result
+      // if it's a rate limit error then we might be able to go again
+      if (rateLimit && rateLimit.fail) {
+        if (rateLimit.waitFor && rateLimit.waitFor < maxWait) {
+          console.log(`Hit a rate limit problem on ${url} - waiting for ${rateLimit.waitFor}ms and retrying`)
+          Utilities.sleep(rateLimit.waitFor)
+          return getter(pageToken, items)
+        } else {
+          console.log(`Trying to ratelimit wait for ${rateLimit.waitFor} cant wait longer than ${maxWait}`)
+        }
+      }
+      return result
     }
 
     // this will be called until there's nothing else to get
@@ -606,7 +634,26 @@ class _TwtApi {
     return Utils.makeThrow(pr)
   }
 
-
+  /**
+   * this is a helper to consolidate an array of results
+   * @param {PackResponse.data} data
+   * @return {PackResponse.data}
+   */
+  packFlattener (data){
+    const result = data.reduce((p,c)=> {
+      Array.prototype.push.apply(p.items, c.items)
+      Array.prototype.push.apply(p.expansions, Utils.arrify(c.expansions))
+      return p
+    },{
+      items: [],
+      expansions: []
+    })
+    return {
+      items: result.items,
+      expansions: Utils.consolidate(result.expansions)
+    }
+    return result
+  }
 
   makePath({ path, params }) {
     return Utils.makeUrl({
