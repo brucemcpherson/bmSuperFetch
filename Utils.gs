@@ -36,14 +36,24 @@ const Utils = (() => {
   const frbEncoder = (str) => encoder(str).replace(/[\.\#\$\[\]]/g, c =>
     '%' + c.charCodeAt(0).toString(16))
 
-  singleSlash = (url) => {
+  const singleSlash = (url) => {
     const s = url.replace(/\/+/g, '/')
     return s === '/' ? '' : s
+  }
+  const combinePath = (...params) => {
+    const r = params.reduce((p, c) => {
+      if (!isNUB(c)) {
+        Array.prototype.push.apply(p, c.split('/'))
+      }
+      return p
+    }, [])
+    return singleSlash(r.join('/'))
   }
 
   const isUndefined = (item) => typeof item === typeof undefined
   const isNull = (item) => item === null
   const isNU = (item) => isNull(item) || isUndefined(item)
+  const isNUB = (item) => isNU(item) || item === ''
 
   const plucker = (obj, props = []) => props.reduce((p, prop) => {
     if (!isNU(obj[prop])) {
@@ -117,6 +127,24 @@ const Utils = (() => {
     return r
   }
 
+  const decipherRange = (range) => {
+    // eg bytes=0-524287
+    if (!range.match(/^[^=]+=\d+-\d+$/)) {
+      return {
+        error: `content-range ${range} is invalid format`,
+        range
+      }
+    }
+
+    const matches = range.replace(/^([^=]+)=(\d+)-(\d+)$/, '$1,$2,$3').split(",")
+    const [unit, start, end] = matches
+    return {
+      range,
+      unit,
+      start: parseInt(start, 10),
+      end: parseInt(end, 10)
+    }
+  }
   const makeChunkIterator = ({ arr, size, start = 0, end }) => {
 
     // default is the entire array
@@ -164,7 +192,7 @@ const Utils = (() => {
   }
 
   // create a URL with additional parameters
-  const makeUrl = ({ url, params, skipSub=false }) => {
+  const makeUrl = ({ url, params, skipSub = false }) => {
     const { pars, url: patchedUrl } = filterParams(url, params, skipSub)
     const uriPars = pars.length ? `?${pars.join('&')}` : ''
     return `${patchedUrl}${uriPars}`
@@ -213,15 +241,13 @@ const Utils = (() => {
         throw new Error(pack.error)
       }
       : () => pack
-
+      
+    // add an asString
+    pack.asString = () => (pack.response && pack.response.getContentText && pack.response.getContentText()) || null
     return pack
   }
 
-  const chunkIt = (inputArray, size) => {
-    // like slice
-    const end = inputArray.length
-    let start = 0
-
+  const chunkIt = (inputArray, size, start = 0, end = inputArray.length) => {
     return {
       *[Symbol.iterator]() {
         while (start < end) {
@@ -233,7 +259,20 @@ const Utils = (() => {
     }
   }
 
+  /** 
+  * isObject
+  * check if an item is an object
+  * @param {object} obj an item to be tested
+  * @return {boolean} whether its an object
+  **/
+  const isObject = (obj) => obj === Object(obj);
+  const isBlob = (blob) => isObject(blob) && blob.toString() === 'Blob'
+
+
+
   return {
+    isObject,
+    isBlob,
     chunkIt,
     makeThrow,
     chunker,
@@ -246,13 +285,16 @@ const Utils = (() => {
     isUndefined,
     isNull,
     isNU,
+    isNUB,
     plucker,
     makepath,
     makeUrl,
     pager,
     makeChunkIterator,
     arrify,
-    consolidate
+    consolidate,
+    decipherRange,
+    combinePath
   }
 
 })()
