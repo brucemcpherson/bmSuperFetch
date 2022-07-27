@@ -431,7 +431,7 @@ class _TwtApi {
     const pageSize = Math.min(maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
 
     return {
-      startToken: page.startToken,
+      pageToken: page.pageToken,
       max,
       pageSize,
       maxWait
@@ -451,20 +451,6 @@ class _TwtApi {
     return this.superFetch.cacher.cacheable && !this.noCache
   }
 
-  tryCache({ url, page }) {
-    // we're not even doing cache here
-    if (!this.isCaching) return {
-      cached: false
-    }
-
-    // this is a special key to be used for cache - cached items are writed already baked
-    const key = this.makeListCacheKey({ url, page })
-
-    if (pack.cached) {
-      // undo the cache wrapping and add a throw method
-      return Utils.makeThrow(this.superFetch.cacheUnLumper(pack, cached))
-    }
-  }
 
 
   initializeQuery({
@@ -514,7 +500,7 @@ class _TwtApi {
     const { page, params, key, initialPath, agenda } = this.initializeQuery(options)
 
     // if we're  even doing cache here and we're not restarting a depage
-    if (this.isCaching && !page.startToken) {
+    if (this.isCaching && !page.pageToken) {
 
       // pick up cached version
       const cached = this.superFetch.cacher.get(key)
@@ -596,7 +582,7 @@ class _TwtApi {
       items: [],
       expansions: [],
       // if this non null, then we're doing a restart of a depage
-      pageToken: page.startToken
+      pageToken: page.pageToken
     }
     do {
       pager = localPager(pager)
@@ -615,8 +601,8 @@ class _TwtApi {
         expansions: Utils.consolidate(pager.expansions)
       }
 
-      // we only want to fiddle with cache if this an untainted get ie. doesn't involve a startToken
-      if (!page.startToken) {
+      // we only want to fiddle with cache if this an untainted get ie. doesn't involve a pageToken
+      if (!page.pageToken) {
 
         if (this.isCaching) {
           // cache lumper is reponsible for rearranging the data for compression and later unpacking
