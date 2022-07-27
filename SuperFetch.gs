@@ -114,7 +114,7 @@ class _SuperFetch {
   }) {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
-    this.tokenService = tokenService 
+    this.tokenService = tokenService
     this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
@@ -129,10 +129,25 @@ class _SuperFetch {
   cacheLumper(pack) {
     if (pack.error) return null
 
+    // if we have a data item, it might not match the blob, so we can't just write the blob
+    // we'll need the original name if we dont have a blob
+    const blobName = pack.blob
+      ? pack.blob.getName
+      : pack.response.getBlob().getName()
+
+    const blobType = pack.blob
+      ? pack.blob.getContentType()
+      : pack.response.getBlob().getContentType()
+
     return {
       createdAt: new Date().getTime(),
       data: pack.data,
       parsed: pack.parsed,
+
+      // these will be beeded for unlumping
+      blobName,
+      blobType,
+
       url: pack.url,
       responsery: {
         responseCode: pack.response.getResponseCode(),
@@ -140,8 +155,8 @@ class _SuperFetch {
       },
       blobbery: pack.blob ? {
         bytes: Utilities.base64Encode(pack.blob.getBytes()),
-        name: pack.blob.getName(),
-        contentType: pack.blob.getContentType
+        name: blobName,
+        contentType: blobType
       } : null
     }
   }
@@ -161,26 +176,37 @@ class _SuperFetch {
    * @return {CacheLumperResponse || null} ready to be written to cache
    */
   cacheUnLumper(pack, cached) {
+
     // pack is mutable in this function - it fiddles with it rather than spreads it
     if (!cached) {
       pack.cached = false
       return pack
     }
-    const { data, blobbery, createdAt, parsed, responsery, url } = cached
+    const { data, blobbery, createdAt, parsed, url,responsery, blobName, blobType } = cached
 
     pack.cached = true
+    pack.error = null
     pack.data = data ? data : null
     pack.url = url
     pack.age = new Date().getTime() - createdAt
-    pack.blob = blobbery ? new Utilities.newBlob(Utilities.base64Decode(blobbery.bytes), blobbery.contentType, blobbery.name) : null
+    pack.blob = blobbery
+      ? new Utilities.newBlob(Utilities.base64Decode(blobbery.bytes), blobbery.contentType, blobbery.name)
+      : null
     pack.parsed = parsed
-    pack.cached = Boolean(pack.cached)
+
     pack.responseCode = responsery && parseInt(responsery.responseCode, 10)
     // since there won't actually be a response object, we need to fake one
     pack.response = {
       getResponseCode: () => responsery && responsery.responseCode,
       getHeaders: () => responsery && responsery.headers,
-      getContentText: () => pack.parsed ? JSON.stringify(pack.data) : pack.blob && pack.blob.getDataAsString(pack.blob)
+      getContentText: () => pack.parsed
+        ? JSON.stringify(pack.data)
+        : pack.blob && pack.blob.getDataAsString(pack.blob),
+      getBlob: () => pack.blob || (
+        pack.parsed
+          ? Utilities.newBlob(JSON.stringify(pack.data), blobType, blobName)
+          : null
+      )
     }
     return pack
   }
@@ -207,7 +233,7 @@ class _SuperFetch {
     }
 
     let { headers = {} } = options
-    if (self.tokenService) headers.authorization = 'Bearer ' + 
+    if (self.tokenService) headers.authorization = 'Bearer ' +
       (typeof self.tokenService === 'function' ? self.tokenService() : self.tokenService)
     options = {
       ...options,
