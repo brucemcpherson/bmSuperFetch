@@ -19,6 +19,9 @@ var Plugins = {
   },
   get Twt() {
     return _TwtApi
+  },
+  get Tsa () {
+    return _TsaApi
   }
 }
 
