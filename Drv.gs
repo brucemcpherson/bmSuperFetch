@@ -1039,6 +1039,7 @@ class _DrvApi {
 
     // this is a special key to be used for cache - cached items are written already baked
     const key = this.makeListCacheKey({ url: this.endPoint + url, page })
+    
     return {
       page,
       key,
@@ -1050,77 +1051,46 @@ class _DrvApi {
    * list files in a given path
    * @param {object} p
    * @param {string} p.path the target folder path
-   * @param {string} [p.name] the target filename
    * @param {string} [p.page] any paging info
    * @param {string} [p.query] any additional quiery filter
    * @param {object[]} params any additional url params
    * @return {PackResponse} the list of matching items
    */
-  _list({ page, parentId, query, params, name }) {
+  _list({ page, parentId, query, params }) {
 
     const initialUrl = this.filesPath + Utils.addParams(
       [this.makeParentQuery({ parentId, query })]
         .concat(this.extraParams)
         .concat(params)
-        .concat(page.pageToken ? [{ pageToken: page.pageToken }] : []))
-
+        .concat(page && page.pageToken ? [{ pageToken: page.pageToken }] : []))
+    
     const init = this.initializeQuery({ url: initialUrl, page })
 
     // optimize size of pages
     page = init.page
     const { key } = init
 
-    // if we're  even doing cache here and we're not restarting a depage
-    if (this.isCaching && !page.pageToken) {
-
-      // pick up cached version
-      const cached = this.superFetch.cacher.get(key)
-
-      // undo the compression and remake standard shape
-      const pack = this.superFetch.cacheUnLumper({}, cached)
-
-      // we're done so add a throw method
-      if (pack.cached) {
-        if (this.showUrl) console.log(key, 'was cached')
-        return Utils.makeThrow(pack)
-      }
-      if (this.showUrl) console.log(key, 'was not cached')
-    }
-
+    // see if the whole list in cache
+    const pack = Pager.cacheDetect(this, {key, page})
+    if (pack.cached) return pack
+    
     // we'll need a noCache version of the proxy as we don't need to partially cache
-    const ref = this.ref(this.base, {
+    const ref = this.ref('', {
       noCache: true
     })
-
-    // it wasn't in cache, so we neeed a getter
-    const getter = (pageToken, items) => {
-      const { pageSize, maxWait } = this.optimizePage(this.maxChunk, items.length, page)
-      const url = this.filesPath + Utils.addParams(
-        [this.makeParentQuery({ parentId, query })]
-          .concat(this.extraParams)
-          .concat([{ pageSize }])
-          .concat(params)
-          .concat(pageToken ? [{ pageToken }] : [])
-      )
-      const result = ref.proxy(url)
-      const { rateLimit } = result
-      // if it's a rate limit error then we might be able to go again
-      if (rateLimit && rateLimit.fail) {
-        if (rateLimit.waitFor && rateLimit.waitFor < maxWait) {
-          console.log(`Hit a rate limit problem on ${url} - waiting for ${rateLimit.waitFor}ms and retrying`)
-          Utilities.sleep(rateLimit.waitFor)
-          return getter(pageToken, items)
-        } else {
-          console.log(`Trying to ratelimit wait for ${rateLimit.waitFor} cant wait longer than ${maxWait}`)
-        }
-      }
-      return result
-    }
 
     // this will be called until there's nothing else to get
     const localPager = (pager) => {
       // standard api get
-      const result = getter(pager.pageToken, pager.items)
+      const result = Pager.getter(this, { 
+        pageToken:pager.pageToken, 
+        items: pager.items,
+        parentId,
+        query,
+        ref,
+        page,
+        params
+      })
 
       // consoldate into items and expansions
       if (!result.error) {
@@ -1131,12 +1101,16 @@ class _DrvApi {
           Array.prototype.push.apply(pager.items, Utils.arrify(result.data.files))
         }
       }
-
-      return {
+     
+      const ob =  {
         ...pager,
-        result,
-        pageToken: result && result.data && result.data.nextPageToken
+        result
       }
+      const p = result && result.data && result.data.nextPageToken
+      if(p) {
+        ob.pageToken = p
+      }
+      return p
     }
 
     // initial call
@@ -1147,7 +1121,11 @@ class _DrvApi {
     }
 
     do {
-      pager = localPager(pager)
+      pager = Pager.localPager(this, {
+        consolidator: ({pager, result}) => Array.prototype.push.apply(pager.items, Utils.arrify(result.data.files)),
+        tokenFinder: ({result}) => result && result.data && result.data.nextPageToken,
+        pager, parentId, query, ref, page, params
+      })
     } while (!pager.result.error && pager.pageToken && pager.items.length < page.max)
 
     // all done, tidy up
@@ -1179,6 +1157,7 @@ class _DrvApi {
       pr.pageToken = pager.pageToken
     }
 
+    
     return Utils.makeThrow(pr)
   }
 
@@ -1207,19 +1186,18 @@ class _DrvApi {
    * list files in a given path
    * @param {object} p
    * @param {string} p.path the target folder path
-   * @param {string} [p.name] the target filename
    * @param {string} [p.page] any paging info
    * @param {string} [p.query] any additional quiery filter
    * @param {object[]} params any additional url params
    * @return {PackResponse} the list of matching items
    */
-  list({ page = {}, path, name, query = '' } = {}, ...params) {
+  list({ page , path,  query = '' } = {}, ...params) {
     // first find the parent folder
     // TODO - filter on name
     const folders = this.getFolders({ path })
     if (folders.error) return folders
     const { data: folder } = folders
-    return this._list({ page, parentId: folder.id, query, params, name })
+    return this._list({ page, parentId: folder.id, query, params })
   }
 
 }
