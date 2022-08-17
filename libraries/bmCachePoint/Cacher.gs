@@ -127,6 +127,7 @@ class _Cacher {
         return p
       } , {}) 
       // we'll give the children a longer expiry in case the header disappears first
+      const t = new Date().getTime()
       this.cachePoint.putAll(bits, expiry + 10)
     }
     // write the header
