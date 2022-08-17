@@ -205,6 +205,54 @@ class _DrvApi {
         if (result.error) return result
         return this._convertById({ id: result.data.id, contentType, toPath, toName, createIfMissing })
       },
+      writeStream: ({ path, name, metadata, createIfMissing = true, contentType }, ...params) => {
+        const self = this
+        const stream = {
+          _stream: null,
+          _tank: null,
+          _init: null,
+          get init () {
+            return this._init
+          },
+          set init(value) {
+            this._init = value
+          },
+          get tank () {
+            return this._tank
+          },
+          set tank(value) {
+            this._tank = value
+          },
+          set stream(value) {
+            this._stream = value
+          },
+          get stream() {
+            return this._stream
+          },
+          
+          create ({capacity = 100} = {}) {
+            // fake a minimal blob
+            const blob = {
+              getContentType: () => contentType,
+              getBytes: () => []
+            }
+            // initialize a resumable upload
+            this.init = self._uploadInit({ path, name, metadata, blob, createIfMissing }, ...params)
+
+            // create a streaming tank to buffer output
+            this.tank  = new _Tank({
+              capacity,
+              setter: (tank, items) => {
+                console.log(items)
+              }
+            })
+
+            // return the whole closure
+            return this
+          }
+        }
+        return stream
+      },
       /**
        * upload a file to a path
        * @param {object} p
@@ -974,7 +1022,7 @@ class _DrvApi {
   }
 
   /**
-   * upload a file to a path
+   * initialize upload a file to a path
    * @param {object} params
    * @param {string} params.path the target path
    * @param {string} params.name the filename
@@ -984,8 +1032,7 @@ class _DrvApi {
    * @param {...*} params.params any additional url params
    * @return {PackResponse} the file metadata
    */
-  upload({ path, name, metadata, blob, createIfMissing = true }, ...params) {
-
+  _uploadInit({ path, name, metadata, blob, createIfMissing = true }, ...params) {
     // the parent folder
     const folderPath = this.getFolderPath({ path })
 
@@ -1012,6 +1059,25 @@ class _DrvApi {
       blob
     })
 
+
+    return init
+
+  }
+
+  /**
+   * upload a file to a path
+   * @param {object} params
+   * @param {string} params.path the target path
+   * @param {string} params.name the filename
+   * @param {object} [params.metadata] file metadata if required
+   * @param {boolean} [createIfMissing] create any missing folders in the given path
+   * @param {Blob} params.blob the blob to upload (should contain the metadata and the contentType as well as the bytes)
+   * @param {...*} params.params any additional url params
+   * @return {PackResponse} the file metadata
+   */
+  upload({ path, name, metadata, blob, createIfMissing }, ...params) {
+
+    const init = this._uploadInit({ path, name, metadata, blob, createIfMissing }, ...params)
     if (init.error) return init
 
     // now we should have an endpoint to hit with the data
@@ -1039,7 +1105,7 @@ class _DrvApi {
 
     // this is a special key to be used for cache - cached items are written already baked
     const key = this.makeListCacheKey({ url: this.endPoint + url, page })
-    
+
     return {
       page,
       key,
@@ -1063,7 +1129,7 @@ class _DrvApi {
         .concat(this.extraParams)
         .concat(params)
         .concat(page && page.pageToken ? [{ pageToken: page.pageToken }] : []))
-    
+
     const init = this.initializeQuery({ url: initialUrl, page })
 
     // optimize size of pages
@@ -1071,47 +1137,13 @@ class _DrvApi {
     const { key } = init
 
     // see if the whole list in cache
-    const pack = Pager.cacheDetect(this, {key, page})
+    const pack = Pager.cacheDetect(this, { key, page })
     if (pack.cached) return pack
-    
+
     // we'll need a noCache version of the proxy as we don't need to partially cache
     const ref = this.ref('', {
       noCache: true
     })
-
-    // this will be called until there's nothing else to get
-    const localPager = (pager) => {
-      // standard api get
-      const result = Pager.getter(this, { 
-        pageToken:pager.pageToken, 
-        items: pager.items,
-        parentId,
-        query,
-        ref,
-        page,
-        params
-      })
-
-      // consoldate into items and expansions
-      if (!result.error) {
-        if (result.cached) {
-          result.error = 'Unexpected cached result in search operation'
-        } else {
-          // standardized response
-          Array.prototype.push.apply(pager.items, Utils.arrify(result.data.files))
-        }
-      }
-     
-      const ob =  {
-        ...pager,
-        result
-      }
-      const p = result && result.data && result.data.nextPageToken
-      if(p) {
-        ob.pageToken = p
-      }
-      return p
-    }
 
     // initial call
     let pager = {
@@ -1122,8 +1154,8 @@ class _DrvApi {
 
     do {
       pager = Pager.localPager(this, {
-        consolidator: ({pager, result}) => Array.prototype.push.apply(pager.items, Utils.arrify(result.data.files)),
-        tokenFinder: ({result}) => result && result.data && result.data.nextPageToken,
+        consolidator: ({ pager, result }) => Array.prototype.push.apply(pager.items, Utils.arrify(result.data.files)),
+        tokenFinder: ({ result }) => result && result.data && result.data.nextPageToken,
         pager, parentId, query, ref, page, params
       })
     } while (!pager.result.error && pager.pageToken && pager.items.length < page.max)
@@ -1157,7 +1189,7 @@ class _DrvApi {
       pr.pageToken = pager.pageToken
     }
 
-    
+
     return Utils.makeThrow(pr)
   }
 
@@ -1191,7 +1223,7 @@ class _DrvApi {
    * @param {object[]} params any additional url params
    * @return {PackResponse} the list of matching items
    */
-  list({ page , path,  query = '' } = {}, ...params) {
+  list({ page, path, query = '' } = {}, ...params) {
     // first find the parent folder
     // TODO - filter on name
     const folders = this.getFolders({ path })
