@@ -22,7 +22,17 @@ var Plugins = {
   },
   get Tsa () {
     return _TsaApi
+  },
+  get Stream () {
+    return _Stream
+  },
+  get Work () {
+    return _Work
+  },
+  get Tank () {
+    return _Tank
   }
+
 }
 
 // export libraries - could be handy
