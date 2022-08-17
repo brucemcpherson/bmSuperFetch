@@ -2,12 +2,14 @@
 const Compress = (() => {
 
   const replacer = (key, value) => value === null ? undefined : value;
-  const stringifyDropNulls = (obj) => JSON.stringify(obj, replacer);
+  //const stringifyDropNulls = (obj) => JSON.stringify(obj, replacer);
+  // actually the replacer slows things down quite a bit so let's not do this
+  const stringifyDropNulls = (obj) => JSON.stringify(obj);
   // management space for compression
-  const OVERHEAD = 40;
+  const OVERHEAD = 128;
   const MINCHUNK = 100;
   const KEYLENGTH = 36 + 4;
-  const CACHEMAX = 100000
+  const CACHEMAX = 100 * 1024
 
   /**
    *
@@ -42,6 +44,7 @@ const Compress = (() => {
     const space = checkSpace(maxChunk)
 
     // first just compress it
+    const t= new Date().getTime()
     let str = compress(obj)
 
     // need to chunk it up
