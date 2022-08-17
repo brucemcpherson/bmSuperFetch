@@ -12,7 +12,8 @@
       {
         "userSymbol": "bmCachePoint",
         "libraryId": "1GOjfvSZL31TxlF61QT1fVNIKnZw9UeqF_2tkPQ5D1n4BBth-yKc6AznH",
-        "version": "5"
+        "version": "0",
+        "developmentMode": true
       },
       {
         "userSymbol": "bmRottler",
