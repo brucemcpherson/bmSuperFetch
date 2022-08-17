@@ -115,11 +115,14 @@ class _SuperFetch {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
     this.tokenService = tokenService
-    this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
+    this.cacher =  new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
   }
 
+  get keyer() {
+    return this.cacher.keyer
+  }
   /**
    * this will make a wrapperfor the cache entry
    * if we have a cached result, we'll need to also partially fake a response as we can't write that
