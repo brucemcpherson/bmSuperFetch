@@ -1,3 +1,4 @@
+
 /**
  * @typedef DrvApiOptions
  * @property {_SuperFetch} superFetch a superfetch instance
@@ -9,6 +10,7 @@
  * @property {object[]} extraParams always add these params
  * @property {number} maxWait how long to wait max for rate limit probs
  * @property {number} max max number to return
+ * @property {maxPost} max size of buffer to post in resumable upload
  */
 class _DrvApi {
   /**
@@ -25,18 +27,20 @@ class _DrvApi {
     extraParams = [],
     max = Infinity,
     //  6 minutes
-    maxWait = 60 * 6 * 1000
+    maxWait = 60 * 6 * 1000,
+    // max fetch payload size is 50mb must be multiple of 256k
+    // sizes over 24 mb ssometimes drop bytes, so let's keep it at that
+    maxPost = 256 * 1024 * 4 * 20
   } = {}) {
     this.minChunk = 1
     this.maxChunk = 1000
     this.maxWait = maxWait
     this.max = max
-    // max fetch payload size is 50mb must be multiple of 256k
-    // set this as near to 50mb as poss (or whatever the urlfetch quota is nowadays, but as multiple of 256k)
-    this.maxPost = 256 * 1024 * 4 * 50
+    this.maxPost = maxPost
     if (this.maxPost % (256 * 1024)) {
       throw new Error('Max post must be multiple of 256k')
     }
+    this.defaultCapacity = this.maxPost
     this.superFetch = superFetch
     this.extraParams = Utils.arrify(extraParams)
     this.base = base
@@ -44,6 +48,7 @@ class _DrvApi {
     this.orderBy = orderBy
     this.includeItemsFromAllDrives = includeItemsFromAllDrives
     this.showUrl = showUrl
+    this.defaultFields = 'id,size,name,mimeType,md5Checksum'
     this.endPoint = `https://www.googleapis.com/drive/v3`
     // normal api endpoint
     this.proxy = superFetch.proxy({
@@ -78,7 +83,8 @@ class _DrvApi {
     showUrl = this.showUrl,
     extraParams = this.extraParams,
     max = this.max,
-    maxWait = this.maxWait
+    maxWait = this.maxWait,
+    maxPost = this.maxPost
   } = {}) {
     return new _DrvApi({
       superFetch,
@@ -89,7 +95,8 @@ class _DrvApi {
       extraParams,
       base: Utils.combinePath(this.base, base),
       max,
-      maxWait
+      maxWait,
+      maxPost
     })
   }
 
@@ -120,8 +127,9 @@ class _DrvApi {
     }
   }
 
-  _fileClosure({ id: pid, path: ppath, name: pname } = {}) {
+  _fileClosure({ id: pid, path: ppath, name: pname, fields: pfields } = {}) {
     const self = this
+
     return {
 
       /**
@@ -133,8 +141,13 @@ class _DrvApi {
        * @param {...*} params any additional api params
        * @return {PackResponse} the file metadata
       */
-      get: ({ id, path, name } = {}, ...params) =>
-        self.get({ id: id || pid, path: Utils.combinePath(ppath, path), name: pname || name }, ...params),
+      get: ({ id, path, name, fields } = {}, ...params) =>
+        self.get({
+          id: id || pid,
+          path: Utils.combinePath(ppath, path),
+          name: pname || name,
+          fields: fields || pfields
+        }, ...params),
 
       page: (page) => {
         return {
@@ -167,8 +180,7 @@ class _DrvApi {
        */
       download: ({ contentType, id, path, name } = {}, ...params) => {
         const result = self.get({ id: id || pid, path: Utils.combinePath(ppath, path), name: pname || name }, ...params)
-        if (result.error) return result
-        return this._getContentById({ id: result.data.id, contentType })
+        return result.error ? result : this._getContentById({ id: result.data.id, contentType })
       },
 
       /**
@@ -205,54 +217,118 @@ class _DrvApi {
         if (result.error) return result
         return this._convertById({ id: result.data.id, contentType, toPath, toName, createIfMissing })
       },
-      writeStream: ({ path, name, metadata, createIfMissing = true, contentType }, ...params) => {
+
+      writeStream: ({ path, name, metadata, createIfMissing = true, contentType, size }, ...params) => {
         const self = this
-        const stream = {
-          _stream: null,
-          _tank: null,
-          _init: null,
-          get init () {
-            return this._init
-          },
-          set init(value) {
-            this._init = value
-          },
-          get tank () {
-            return this._tank
-          },
-          set tank(value) {
-            this._tank = value
-          },
-          set stream(value) {
-            this._stream = value
-          },
-          get stream() {
-            return this._stream
-          },
-          
-          create ({capacity = 100} = {}) {
-            // fake a minimal blob
-            const blob = {
-              getContentType: () => contentType,
-              getBytes: () => []
-            }
-            // initialize a resumable upload
-            this.init = self._uploadInit({ path, name, metadata, blob, createIfMissing }, ...params)
+        const stream = new _FakeStream()
 
-            // create a streaming tank to buffer output
-            this.tank  = new _Tank({
-              capacity,
-              setter: (tank, items) => {
-                console.log(items)
-              }
-            })
+        // specific to write streams
+        stream.create = ({ capacity = self.defaultCapacity } = {}) => {
 
-            // return the whole closure
-            return this
+          // set tank capacity to multiple of 256k
+          capacity = Utils.roundUpCapacity(capacity)
+
+          // initialize a resumable upload
+          stream.init = self._uploadInit({
+            path,
+            name,
+            metadata,
+            createIfMissing,
+            contentType,
+            size
+          }, ...params)
+
+          // this is the overall file size
+          stream.bytesLength = size
+
+          // record the error in case op does try.catch
+          stream.error = stream.init.error
+          if (stream.error) {
+            throw stream.error
           }
+
+          // create a streaming tank to buffer output
+          stream.tank = new _Tank({
+            // this determines how much in the tank before an emptier is triggered
+            capacity,
+
+            // items will be released to the emptier in a controlled way by the tank as it fills
+            emptier: (tank, items) => {
+
+              // do a chunk
+              const { start, result } = self._resumableUploadChunk({
+                location: stream.location,
+                chunk: items,
+                start: stream.start,
+                bytesLength: stream.bytesLength
+              })
+
+              // set up for the next round
+              stream.error = result.error
+              stream.lastStatus = result.responseCode
+              if (stream.error) throw stream.error
+              stream.start = start
+
+            }
+          })
+
+          // finish up - when we detect strem-end, get a status updata
+          stream.tank.on('stream-end', () => {
+            stream.upload =
+              self._resumableUploadStatus({
+                result: stream,
+                location: stream.location,
+                bytesLength: stream.bytesLength
+              })
+            stream.error = stream.upload.error
+            if (stream.error) throw stream.error
+          })
+
+
+          // return the whole closure
+          return Utils.makeThrow(stream)
         }
-        return stream
+
+
+        return Utils.makeThrow(stream)
       },
+
+      readStream: ({ id, path, name } = {}, ...params) => {
+        const self = this
+        const stream = new _FakeStream()
+
+        // specific to write streams
+        stream.create = ({ capacity = self.defaultCapacity } = {}) => {
+
+          // set tank capacity to multiple of 256k
+          capacity = Utils.roundUpCapacity(capacity)
+
+          // initialize a resumable upload
+          stream.init = self.get({
+            id: id || pid,
+            path: Utils.combinePath(ppath, path),
+            name: pname || name
+          }, ...params)
+
+          // register an error if there was one
+          stream.error = stream.init.error
+
+          // create a streaming tank to buffer output
+          stream.tank = new _Tank({
+            capacity,
+            filler: Utils.makeTankFiller({
+              stream,
+              fetcher: ({ range }) => self._getContentById({
+                id: stream.id,
+                range
+              }, ...params)
+            })
+          })
+          return Utils.makeThrow(stream)
+        }
+        return Utils.makeThrow(stream)
+      },
+
       /**
        * upload a file to a path
        * @param {object} p
@@ -636,11 +712,23 @@ class _DrvApi {
    * get a files metadata from its id
    * @param {object} params
    * @param {string} params.id the file id
+   * @param {string} params.fields any extra fields
    * @param {...*} params.params any additional url params
    * @return {PackResponse} the file
    */
-  _getById({ id }, ...params) {
-    return this.proxy(`${this.makeFilePath({ id })}${Utils.addParams(params.concat(this.extraParams))}`)
+  _getById({ id, fields }, ...params) {
+
+    // combine && remove dups
+    const s = [{
+      fields: this.defaultFields.split(",")
+        .concat(fields ? fields.split(',') : [])
+        .filter((f, i, a) => a.indexOf(f) === i)
+        .join(",")
+    }]
+
+    return this.proxy(
+      `${this.makeFilePath({ id })}${Utils.addParams(s.concat(params, this.extraParams))}`
+    )
   }
 
   /**
@@ -714,11 +802,12 @@ class _DrvApi {
    * @param {string} [p.path] the folder/file path
    * @param {string} [p.name] the target file name
    * @param {string} [p.id] the target file id  
+   * @@param {string} [p.fields] the fields to get
    * @param {string} params.params any additional api params
    * @return {PackResponse} the file metadata
    */
   // get an item
-  get({ id, path, name, query } = {}, ...params) {
+  get({ id, path, name, query, fields } = {}, ...params) {
 
     // check param combination
     const t = this._checkPathPars({ id, name, path })
@@ -727,7 +816,7 @@ class _DrvApi {
 
     // its an id find
     if (id) {
-      return this._getById({ id }, ...params)
+      return this._getById({ id, fields }, ...params)
     }
 
     // first find the folder
@@ -753,7 +842,7 @@ class _DrvApi {
       file.error = `file not found - ${folderPath} / ${title}`
       return Utils.makeThrow(file)
     } else {
-      return this._getById({ id: file.data.files[0].id }, ...params)
+      return this._getById({ id: file.data.files[0].id, fields }, ...params)
     }
   }
 
@@ -811,17 +900,23 @@ class _DrvApi {
    * @param {object} params
    * @param {string} params.id the file id
    * @param {string} [params.contentType] override the content type specified in the files metadata if required
+   * @param {string} [params.range] create a range header 
    * @return {PackResponse} the file metadata
    */
-  _getContentById({ id, contentType = null }, ...params) {
+  _getContentById({ id, contentType = null, range }, ...params) {
 
     // first get the file metadata
     const metaResult = this._getById({ id }, ...params)
     if (metaResult.error) return metaResult
 
     // now get the content
+    const options = {}
+
+    // this is for partial downloads
+    if (range) options.headers = { range }
+
     const result =
-      this.proxy(`${this.makeFilePath({ id })}${Utils.addParams([{ alt: 'media' }].concat(this.extraParams))}`)
+      this.proxy(`${this.makeFilePath({ id })}${Utils.addParams([{ alt: 'media' }].concat(this.extraParams))}`, options)
     if (result.error) return result
 
     // if its a parseable file, there wont be any blob, so we'll stick in a reference to it in case its preferred
@@ -872,18 +967,18 @@ class _DrvApi {
    * @param {object} params
    * @param {object[]} params.params any extra api params
    * @param {object} [params.metadata] file metadata if required
-   * @param {Blob} params.blob the blob to upload (should contain the metadata and the contentType as well as the bytes)
+   * @param {number} params.size the no of bytes to upload
+   * @param {string} params.contentType the type of content to upload
    * @return {PackResponse} the file metadata
    */
   // this initializes a resumable upload and gets a url to use to complete it
-  _initResumableUpload({ params, metadata, blob }) {
+  _initResumableUpload({ params, metadata, size, contentType }) {
     const path = Utils.addParams([{ uploadType: 'resumable' }].concat(params))
 
-    // if there's any upload metadata
+    // if there's any upload metadata 
     const payload = metadata ? JSON.stringify(metadata) : ''
 
     // prepare initial resumable upload headers
-    const bytes = blob.getBytes()
     const headers = {}
 
     /* Content - Type.Required if you have metadata for the file.
@@ -905,17 +1000,16 @@ class _DrvApi {
      * If the MIME type of the data is not specified in metadata or through this header, 
      * the object is served as application/octet-stream.
     */
-    const xContentType = blob.getContentType() && !(metadata && metadata.mimeType)
-    if (xContentType) {
-      headers["X-Upload-Content-Type"] = xContentType
+    if (contentType) {
+      headers["X-Upload-Content-Type"] = contentType
     }
 
     /* X-Upload-Content-Length. Optional. 
      * Set to the number of bytes of file data, 
      * which is transferred in subsequent requests
      */
-    if (bytes.length) {
-      headers["X-Upload-Content-Length"] = bytes.length
+    if (size) {
+      headers["X-Upload-Content-Length"] = size
     }
 
     // finalize the options
@@ -923,6 +1017,7 @@ class _DrvApi {
       method: "POST",
       headers
     }
+
     // add metadata
     if (payload) {
       options.payload = payload
@@ -955,6 +1050,64 @@ class _DrvApi {
     })
     return result
   }
+
+  _resumableUploadChunk({ location, chunk, start = 0, bytesLength }) {
+    const end = chunk.length + start - 1
+    const headers = {
+      "Content-Range": `bytes ${start}-${end}/${bytesLength || '*'}`
+    }
+
+    const result = this.vanillaProxy(location, {
+      method: "PUT",
+      payload: chunk,
+      headers
+    })
+
+    // this will descript the range we actually got back
+    let range = null
+
+    // we'll get a 308 if we're not done
+    if (result.responseCode === 308) {
+
+      // we're not done - check range makes sense
+      range = Utils.decipherRange(result.response)
+
+
+      if (range.start !== 0) {
+        throw `detected start of range chunk ${range.start} didn't match expected ${0}`
+      } else if (range.end !== end) {
+        throw `detected end of range chunk ${range.end} didn't match expected ${end}`
+      } else {
+        // the next start point
+        start = range.end + 1
+      }
+
+    } else {
+      // it was the last chunk
+      start += chunk.length
+    }
+    return {
+      result,
+      start,
+      range
+    }
+  }
+  _resumableUploadStatus({ result, location, bytesLength }) {
+    // wrap up
+    if (result.error) {
+      return Utils.makeThrow(result)
+    } else {
+      // get the final status of the file
+      const status = this.resumableStatus({ location, size: bytesLength })
+      if (!status.error) {
+        // delete the resulmable link
+        const delStatus = this.vanillaProxy(location, {
+          method: "DELETE"
+        })
+      }
+      return status
+    }
+  }
   /**
    * continue a resumable/chunked upload after initialization
    * @param {object} params
@@ -964,60 +1117,21 @@ class _DrvApi {
    */
   _hitResumableUpload({ location, blob }) {
 
-
     const bytes = blob.getBytes()
+    const bytesLength = bytes.length
     let result = {}
     let start = 0
     const size = this.maxPost
 
     // do each chunk
-    while (!result.error && start < bytes.length) {
-      const chunk = bytes.slice(start, Math.min(bytes.length, size + start))
-      const end = chunk.length + start - 1
-      // urlfetch calculates content-length automatically so no need to add here
-
-      const headers = {
-        "Content-Range": `bytes ${start}-${end}/${bytes.length}`
-      }
-      result = this.vanillaProxy(location, {
-        method: "PUT",
-        payload: chunk,
-        headers
-      })
-
-      // we'll get a 308 if we're not done
-      if (result.responseCode === 308) {
-        // we're not done - check range makes sense
-        const range = Utils.decipherRange(result.response.getHeaders().Range)
-        if (range.error) {
-          result.error = range.error
-        } else if (range.start !== start) {
-          result.error = `detected start of range chunk ${range.start} didn't match expected ${start}`
-        } else if (range.end !== end) {
-          result.error = `detected end of range chunk ${range.end} didn't match expected ${end}`
-        } else {
-          start = range.end + 1
-        }
-
-      } else {
-        start += chunk.length
-      }
+    while (!result.error && start < bytesLength) {
+      const chunk = bytes.slice(start, Math.min(bytesLength, size + start))
+      const ru = this._resumableUploadChunk({ location, chunk, start, bytesLength })
+      start = ru.start
+      result = ru.result
     }
 
-    // wrap up
-    if (result.error) {
-      return Utils.makeThrow(result)
-    } else {
-      // get the final status of the file
-      const status = this.resumableStatus({ location, size: bytes.length })
-      if (!status.error) {
-        // delete the resulmable link
-        const delStatus = this.vanillaProxy(location, {
-          method: "DELETE"
-        })
-      }
-      return status
-    }
+    return this._resumableUploadStatus({ result, location, bytesLength })
 
   }
 
@@ -1028,11 +1142,12 @@ class _DrvApi {
    * @param {string} params.name the filename
    * @param {object} [params.metadata] file metadata if required
    * @param {boolean} [createIfMissing=true] create any missing folders in the given path
-   * @param {Blob} params.blob the blob to upload (should contain the metadata and the contentType as well as the bytes)
+   * @param {string} [contentType] can be specified here 
+   * @param {string} [size] can be specified here 
    * @param {...*} params.params any additional url params
    * @return {PackResponse} the file metadata
    */
-  _uploadInit({ path, name, metadata, blob, createIfMissing = true }, ...params) {
+  _uploadInit({ path, name, metadata, createIfMissing = true, contentType, size }, ...params) {
     // the parent folder
     const folderPath = this.getFolderPath({ path })
 
@@ -1046,8 +1161,8 @@ class _DrvApi {
     // the file metadata
     const meta = this.makeMetadata({
       parentId: folder.data.id,
-      mimeType: blob.getContentType(),
-      title
+      title,
+      mimeType: MimeType.JSON
     })
     // initialize the upload
     const init = this._initResumableUpload({
@@ -1056,9 +1171,9 @@ class _DrvApi {
         ...meta,
         ...(metadata || {})
       },
-      blob
+      size,
+      contentType
     })
-
 
     return init
 
@@ -1077,7 +1192,9 @@ class _DrvApi {
    */
   upload({ path, name, metadata, blob, createIfMissing }, ...params) {
 
-    const init = this._uploadInit({ path, name, metadata, blob, createIfMissing }, ...params)
+    const size = blob.getBytes().length
+    const contentType = blob.getContentType()
+    const init = this._uploadInit({ path, name, metadata, size, contentType, createIfMissing }, ...params)
     if (init.error) return init
 
     // now we should have an endpoint to hit with the data
