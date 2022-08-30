@@ -31,6 +31,9 @@ var Plugins = {
   },
   get Tank () {
     return _Tank
+  },
+  get FakeStream () {
+    return _FakeStream
   }
 
 }
