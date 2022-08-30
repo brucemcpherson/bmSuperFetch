@@ -127,24 +127,52 @@ const Utils = (() => {
     return r
   }
 
-  const decipherRange = (range) => {
-    // eg bytes=0-524287
-    if (!range.match(/^[^=]+=\d+-\d+$/)) {
-      return {
-        error: `content-range ${range} is invalid format`,
-        range
-      }
-    }
+  const decipherRange = (response) => {
 
-    const matches = range.replace(/^([^=]+)=(\d+)-(\d+)$/, '$1,$2,$3').split(",")
-    const [unit, start, end] = matches
+    const headers = response.getHeaders()
+    const { 'Range': range, 'Content-Type': contentType } = headers
+    if (!range) return {
+      error: "cant decipher range - it's missing"
+    }
+    const rx = /^(\w+)=(\d+)-(\d+)$/
+    const matches = range && range.replace(rx, '$1,$2,$3').split(",")
+    const [unit, start, end] = matches || []
+
     return {
       range,
       unit,
       start: parseInt(start, 10),
-      end: parseInt(end, 10)
+      end: parseInt(end, 10),
+      contentType,
+      headers
+    }
+
+
+  }
+
+  const decipherContent = (response) => {
+
+    // eg Content-Range: bytes 0-524287
+    const headers = response.getHeaders()
+
+    const { 'Content-Range': contentRange, 'Content-Length': contentLength, 'Content-Type': contentType } = headers
+
+    const rx = /^(\w+)\s+(\d+)-(\d+)\/(\d+)$/
+    const matches = contentRange && contentRange.replace(rx, '$1,$2,$3,$4').split(",")
+    const [unit, start, end, size] = matches || []
+
+    return {
+      contentRange,
+      unit,
+      start: parseInt(start, 10),
+      end: parseInt(end, 10),
+      size: parseInt(size, 10),
+      contentLength: parseInt(contentLength, 10),
+      contentType,
+      headers
     }
   }
+
   const makeChunkIterator = ({ arr, size, start = 0, end }) => {
 
     // default is the entire array
@@ -241,7 +269,7 @@ const Utils = (() => {
         throw new Error(pack.error)
       }
       : () => pack
-      
+
     // add an asString
     pack.asString = () => (pack.response && pack.response.getContentText && pack.response.getContentText()) || null
     return pack
@@ -267,10 +295,115 @@ const Utils = (() => {
   **/
   const isObject = (obj) => obj === Object(obj);
   const isBlob = (blob) => isObject(blob) && blob.toString() === 'Blob'
+  const isArray = (item) => Array.isArray(item)
+  const isByteArray = (item) => isArray(item) && !isUndefined(item.byteLength)
+  const papply = (item, itemToAdd) => {
+    Array.prototype.push.apply(item, itemToAdd)
+    return item
+  }
 
+  /**
+   * convert an array of things to bytes
+   * @param {*[]} items to be converted
+   * @return {byte[]} converteed
+   */
+  const toBytes = (items) => {
+    if (isUndefined(items)) throw 'refuse to convert undefined to bytes'
+    return Utilities.newBlob(JSON.stringify(items)).getBytes()
+  }
+
+  const uuid = () => Utilities.getUuid()
+
+  const makeTankFiller = ({ stream, fetcher }) => {
+    return (tank) => {
+      // init didnt happen propery
+      if (Utils.isNU(stream.size)) {
+        throw error`couldnt find data size to stream - stream not initialized properly`
+      }
+      if (stream.error) {
+        throw new Error(stream.error)
+      }
+      // make the range
+      const { start, size, name, isMore, lastStatus, contentType } = stream
+      const end = Math.min(start + tank.capacity, size) - 1
+      const range = `bytes=${start}-${end}`
+
+      // no more data - signal end
+      if (!isMore) {
+        console.log('done detected')
+        return {
+          items: null
+        }
+      }
+
+      // should never happen
+      if (start > size) {
+        console.log('starts too big')
+        throw `${name} trying to downloade from ${start} bytes: expected only ${size}`
+      }
+
+      // fetch the data
+      const ru = fetcher({ range })
+
+      // check the response headers that all went according to plan
+      const content = Utils.decipherContent(ru.response)
+      console.log(content)
+
+      stream.lastStatus = ru.responseCode
+      stream.error = ru.error
+
+      // halt tank if an error
+      if (ru.error) {
+        console.log('readstream:there was an error', ru.error)
+        return {
+          error: ru.error
+        }
+      }
+
+      // get the bytes returned
+      const items = ru.response.getBlob().getBytes()
+      console.log('got', items.length)
+
+      // set next fetch
+      stream.bytesLength = items.length
+
+      if (stream.bytesLength !== content.contentLength) {
+        throw `got ${stream.bytesLength} bytes but should have been ${content.contentLength}`
+      }
+      if (start !== content.start || end !== content.end || size !== content.size) {
+        throw `got ${content.contentRange} but expected ${range}`
+      }
+      if (contentType !== content.contentType) {
+        throw `got ${content.contentRange} but expected ${contentType}`
+      }
+      stream.start += stream.bytesLength
+
+
+      // commit to tank
+      return {
+        items
+      }
+    }
+  }
+
+  const roundUpCapacity = (capacity) => {
+    // set tank capacity to multiple of 256k
+    const roundedCapacity = Math.ceil(capacity / (256 * 1024)) * 256 * 1024
+    if (roundedCapacity !== capacity) {
+      console.log(`Automatically rounded up capacity from ${capacity} to ${roundedCapacity}`)
+      capacity = roundedCapacity
+    }
+    return capacity
+  }
 
 
   return {
+    roundUpCapacity,
+    makeTankFiller,
+    toBytes,
+    papply,
+    isArray,
+    isByteArray,
     isObject,
     isBlob,
     chunkIt,
@@ -294,7 +427,9 @@ const Utils = (() => {
     arrify,
     consolidate,
     decipherRange,
-    combinePath
+    decipherContent,
+    combinePath,
+    uuid
   }
 
 })()
