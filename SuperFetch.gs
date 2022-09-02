@@ -115,11 +115,32 @@ class _SuperFetch {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
     this.tokenService = tokenService
-    this.cacher =  new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
+    this.expiry = expiry
+    this.prefix = prefix
+    this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
   }
 
+  ref({
+    cacheService = this.cacheService,
+    fetcherApp = this.fetcher,
+    tokenService = this.tokenService,
+    expiry = this.expiry,
+    prefix = this.prefix,
+    rottler = this.rottler,
+    missingPropertyIsFatal = this.missingPropertyIsFatal
+  }) {
+    return new SuperFetch({
+      cacheService,
+      fetcherApp,
+      tokenService,
+      expiry,
+      prefix,
+      rottler,
+      missingPropertyIsFatal
+    })
+  }
   get keyer() {
     return this.cacher.keyer
   }
@@ -185,7 +206,7 @@ class _SuperFetch {
       pack.cached = false
       return pack
     }
-    const { data, blobbery, createdAt, parsed, url,responsery, blobName, blobType } = cached
+    const { data, blobbery, createdAt, parsed, url, responsery, blobName, blobType } = cached
 
     pack.cached = true
     pack.error = null
