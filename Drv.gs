@@ -24,7 +24,7 @@ class _DrvApi {
     includeItemsFromAllDrives = false,
     orderBy = "folder,name,modifiedTime desc",
     showUrl = false,
-    extraParams = [],
+    extraParams = [], 
     max = Infinity,
     //  6 minutes
     maxWait = 60 * 6 * 1000,
@@ -218,7 +218,7 @@ class _DrvApi {
         return this._convertById({ id: result.data.id, contentType, toPath, toName, createIfMissing })
       },
 
-      writeStream: ({ path, name, metadata, createIfMissing = true, contentType, size }, ...params) => {
+      writeStream: ({ path, name, metadata, createIfMissing = true, contentType, size, retainLocation }, ...params) => {
         const self = this
         const stream = new _FakeStream()
 
@@ -254,9 +254,10 @@ class _DrvApi {
 
             // items will be released to the emptier in a controlled way by the tank as it fills
             emptier: (tank, items) => {
-
+              
               // do a chunk
-              const { start, result } = self._resumableUploadChunk({
+              // it's possible that the
+              const { start, result } = self.resumableUploadChunk({
                 location: stream.location,
                 chunk: items,
                 start: stream.start,
@@ -269,6 +270,8 @@ class _DrvApi {
               if (stream.error) throw stream.error
               stream.start = start
 
+              // if it didn't poke the whole thing, then we need to return the chunks that didn't go to the source tank
+
             }
           })
 
@@ -278,7 +281,8 @@ class _DrvApi {
               self._resumableUploadStatus({
                 result: stream,
                 location: stream.location,
-                bytesLength: stream.bytesLength
+                bytesLength: stream.bytesLength,
+                retainLocation
               })
             stream.error = stream.upload.error
             if (stream.error) throw stream.error
@@ -296,7 +300,11 @@ class _DrvApi {
       readStream: ({ id, path, name } = {}, ...params) => {
         const self = this
         const stream = new _FakeStream()
-
+        
+        // cant use cache for this
+        const {proxy} = this.ref('', {
+          noCache: true
+        })
         // specific to write streams
         stream.create = ({ capacity = self.defaultCapacity } = {}) => {
 
@@ -320,7 +328,8 @@ class _DrvApi {
               stream,
               fetcher: ({ range }) => self._getContentById({
                 id: stream.id,
-                range
+                range,
+                proxy
               }, ...params)
             })
           })
@@ -903,7 +912,7 @@ class _DrvApi {
    * @param {string} [params.range] create a range header 
    * @return {PackResponse} the file metadata
    */
-  _getContentById({ id, contentType = null, range }, ...params) {
+  _getContentById({ id, contentType = null, range, proxy = this.proxy }, ...params) {
 
     // first get the file metadata
     const metaResult = this._getById({ id }, ...params)
@@ -913,10 +922,12 @@ class _DrvApi {
     const options = {}
 
     // this is for partial downloads
-    if (range) options.headers = { range }
+    if (range) {
+      options.headers = { range }
+    }
 
     const result =
-      this.proxy(`${this.makeFilePath({ id })}${Utils.addParams([{ alt: 'media' }].concat(this.extraParams))}`, options)
+      proxy(`${this.makeFilePath({ id })}${Utils.addParams([{ alt: 'media' }].concat(this.extraParams))}`, options)
     if (result.error) return result
 
     // if its a parseable file, there wont be any blob, so we'll stick in a reference to it in case its preferred
@@ -1042,6 +1053,7 @@ class _DrvApi {
   }
 
   resumableStatus({ location, size }) {
+    size ="*"
     const result = this.vanillaProxy(location, {
       method: "PUT",
       headers: {
@@ -1051,8 +1063,9 @@ class _DrvApi {
     return result
   }
 
-  _resumableUploadChunk({ location, chunk, start = 0, bytesLength }) {
+  resumableUploadChunk({ location, chunk, start = 0, bytesLength }) {
     const end = chunk.length + start - 1
+
     const headers = {
       "Content-Range": `bytes ${start}-${end}/${bytesLength || '*'}`
     }
@@ -1092,14 +1105,14 @@ class _DrvApi {
       range
     }
   }
-  _resumableUploadStatus({ result, location, bytesLength }) {
+  _resumableUploadStatus({ result, location, bytesLength, retainLocation = true }) {
     // wrap up
     if (result.error) {
       return Utils.makeThrow(result)
     } else {
       // get the final status of the file
       const status = this.resumableStatus({ location, size: bytesLength })
-      if (!status.error) {
+      if (!status.error && !retainLocation) {
         // delete the resulmable link
         const delStatus = this.vanillaProxy(location, {
           method: "DELETE"
@@ -1115,7 +1128,7 @@ class _DrvApi {
    * @param {Blob} params.blob the blob to upload
    * @return {PackResponse} the file metadata
    */
-  _hitResumableUpload({ location, blob }) {
+  _hitResumableUpload({ location, blob, retainLocation }) {
 
     const bytes = blob.getBytes()
     const bytesLength = bytes.length
@@ -1126,12 +1139,12 @@ class _DrvApi {
     // do each chunk
     while (!result.error && start < bytesLength) {
       const chunk = bytes.slice(start, Math.min(bytesLength, size + start))
-      const ru = this._resumableUploadChunk({ location, chunk, start, bytesLength })
+      const ru = this.resumableUploadChunk({ location, chunk, start, bytesLength })
       start = ru.start
       result = ru.result
     }
 
-    return this._resumableUploadStatus({ result, location, bytesLength })
+    return this._resumableUploadStatus({ result, location, bytesLength, retainLocation })
 
   }
 
@@ -1194,7 +1207,14 @@ class _DrvApi {
 
     const size = blob.getBytes().length
     const contentType = blob.getContentType()
-    const init = this._uploadInit({ path, name, metadata, size, contentType, createIfMissing }, ...params)
+    const init = this._uploadInit({ 
+      path, 
+      name, 
+      metadata, 
+      size, 
+      contentType, 
+      createIfMissing 
+    }, ...params)
     if (init.error) return init
 
     // now we should have an endpoint to hit with the data
