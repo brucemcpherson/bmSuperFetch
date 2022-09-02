@@ -34,7 +34,7 @@ class _Tank {
   // handy transformers you can us
   static get transformers() {
     return {
-      toBytes: (items) => {
+      toBytes: (tank, items) => {
         return {
           items: Utils.toBytes(items)
         }
@@ -80,11 +80,13 @@ class _Tank {
       'error',
       'level',
       'pipe-done',
-      'stream-end'
+      'stream-end',
+      'before-stream-end'
     ].reduce((p, c) => {
       p[c] = null
       return p
     }, {})
+    
     if (!this.capacity) throw 'capacity must be > 0'
     const fc = ['filler', 'emptier'].reduce((p, c) => p + (this[c] ? 1 : 0), 0)
     if (fc > 1) throw 'a tank can have a filler or an emptier but not both'
@@ -363,13 +365,17 @@ class _Tank {
     })
   }
 
+  isActionable(eventName) {
+    return this.events[eventName]
+  }
+
   /**
    * signal an event for the given event
    * @param {string} eventName event to signal
    * @return {_Tank} self
    */
   emit(eventName) {
-    if (this.events[eventName]) {
+    if (this.isActionable(eventName)) {
       const { action, context } = this.events[eventName]
       const readings = this._readings(eventName)
       action({
@@ -397,7 +403,7 @@ class _Tank {
       if (result.error) {
         this.error = result.error
       }
-      items = result.items
+       items = result.items
     }
 
     if (items.length) {
@@ -472,21 +478,29 @@ class _Tank {
     return items
   }
 
-  /**
-   * execute the filler function
-   * @return {TankPack} what came back from the filler
-   */
-  execFiller() {
+  _fillerWork () {
+
     this.itemsFilled = 0
 
     this.emit('filler-start')
-    const result = this.filler(this)
+    let result = this.filler(this)
     this.itemsFilled = result.items && result.items.length
 
     if (result.error) {
       this.error = result.error
     }
     this.emit('filler-end')
+    return result
+  }
+  /**
+   * execute the filler function
+   * @return {TankPack} what came back from the filler
+   */
+  execFiller() {
+
+    // do a fill
+    const result = this._fillerWork()
+
     // a null or undefined items signals input is exhausted
     // otherwise we add the items to pen
     if (!result.items) {
@@ -507,6 +521,7 @@ class _Tank {
     this.emit('emptier-start')
     const result = this.emptier(this, items)
     this.itemsEmptied = items && items.length
+
     this.emit('emptier-end')
     if (result && result.error) {
       this.error = result.error
@@ -526,7 +541,7 @@ class _Tank {
       return pack
     }
     this.emit('transformer-start')
-    const result = this.transformer(pack.items)
+    const result = this.transformer(this, pack.items)
     this.itemsTransformed = (result && result.items && result.items.length) || 0
     this.emit('transformer-end')
     if (result && result.error) {
@@ -665,6 +680,8 @@ class _Tank {
       }
 
       // now just clear out the final pipe
+      out.emit('before-stream-end')
+
       out.empty()
 
       // signal it's all over for each member of the pipeline
