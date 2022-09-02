@@ -330,7 +330,6 @@ const Utils = (() => {
 
       // no more data - signal end
       if (!isMore) {
-        console.log('done detected')
         return {
           items: null
         }
@@ -347,7 +346,6 @@ const Utils = (() => {
 
       // check the response headers that all went according to plan
       const content = Utils.decipherContent(ru.response)
-      console.log(content)
 
       stream.lastStatus = ru.responseCode
       stream.error = ru.error
@@ -362,7 +360,7 @@ const Utils = (() => {
 
       // get the bytes returned
       const items = ru.response.getBlob().getBytes()
-      console.log('got', items.length)
+
 
       // set next fetch
       stream.bytesLength = items.length
