@@ -5,6 +5,8 @@
  * @property {function} tokenService the token service to return a an access token
  * @property {number} [expiry=60 * 60 * 1] default cache expiry
  * @property {string} [prefix='superfetch'] default usually it's just to separate cache entries if necessary
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
  * @property {boolean} [missingPropertyIsFatal = true] proxy will throw if attempt to access a missing property
  * @property {Rottler} [rottler] rottler for throttling calls (https://ramblings.mcpher.com/vuejs-apps-script-add-ons/rate-limit/)
  */
@@ -110,16 +112,25 @@ class _SuperFetch {
     expiry = 60 * 60 * 1,
     prefix = 'superfetch',
     rottler,
-    missingPropertyIsFatal = true
+    missingPropertyIsFatal = true,
+    stale = false,
+    staleKey = 'stale'
   }) {
     this.cacheService = cacheService
     this.fetcher = fetcherApp
     this.tokenService = tokenService
     this.expiry = expiry
     this.prefix = prefix
-    this.cacher = new bmCachePoint.Cacher({ cachePoint: cacheService, expiry, prefix })
+    this.cacher = new bmCachePoint.Cacher({ 
+      cachePoint: cacheService, 
+      expiry, 
+      prefix,
+      stale,
+      staleKey
+    })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
+    console.log(this)
   }
 
   ref({
@@ -129,7 +140,9 @@ class _SuperFetch {
     expiry = this.expiry,
     prefix = this.prefix,
     rottler = this.rottler,
-    missingPropertyIsFatal = this.missingPropertyIsFatal
+    missingPropertyIsFatal = this.missingPropertyIsFatal,
+    stale = this.stale,
+    staleKey = this.staleKey
   }) {
     return new SuperFetch({
       cacheService,
@@ -138,9 +151,15 @@ class _SuperFetch {
       expiry,
       prefix,
       rottler,
-      missingPropertyIsFatal
+      missingPropertyIsFatal,
+      stale,
+      staleKey
     })
   }
+  makeStale () {
+    return this.cacher.makeStale()
+  }
+
   get keyer() {
     return this.cacher.keyer
   }
