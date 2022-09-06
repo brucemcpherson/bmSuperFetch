@@ -34,6 +34,9 @@ var Plugins = {
   },
   get FakeStream () {
     return _FakeStream
+  },
+  get Smg () {
+    return _SmgApi
   }
 
 }
