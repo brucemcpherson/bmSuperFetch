@@ -9,16 +9,21 @@
  * @property {CacheService} [cachePoint=null] the cacheservice to use - if null no cachng will be done, but all methods will still work
  * @property {number} [expiry = 60*60] default expiry in seconds
  * @property  {string} [prefix='bmCachePoint] can be used to change key generation algo to partition cache entries
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
  * @return {_Cacher}
  */
 class _Cacher {
   /**
    * @param {CacherOptions}
    */
-  constructor({ cachePoint = null, expiry = 60 * 60, prefix = 'bmCachePoint' }) {
+  constructor({ cachePoint = null, expiry = 60 * 60, prefix = 'bmCachePoint' , staleKey = 'stale' , stale = false}) {
     this.cachePoint = cachePoint
     this.expiry = expiry
     this.prefix = prefix
+    this.staleKey = staleKey
+    this.stale = stale
+    if (this.stale && !this.staleKey) throw `Must specify a staleKey if stale is active`
   }
 
   /**
@@ -26,9 +31,9 @@ class _Cacher {
    * @param {...*} var_args
    * return {string}
    */
-  digester() {
+  digester(...args) {
     // conver args to an array and digest them
-    const t = Array.prototype.slice.call(arguments).map(function (d) {
+    const t = args.map(function (d) {
       if(typeof d === typeof undefined) throw new Error('digester key component cant be undefined')
       return (Object(d) === d) ? JSON.stringify(d) : d.toString();
     }).join("-")
@@ -43,7 +48,7 @@ class _Cacher {
    * @return {string} the key
    */ 
   keyer(key, options = '') {
-    return this.digester(this.prefix, key, options)
+    return this.digester(this.staleValue() ,this.prefix, key, options)
   }
 
   /**
@@ -51,6 +56,26 @@ class _Cacher {
    */
   get cacheable () {
     return Boolean (this.cachePoint)
+  }
+
+  get staler () {
+    return this.staleKey + '_' + this.prefix
+  }
+  /** 
+   * if there's a stalekey its value will be added to the prefix
+   * @return {string}
+   * */ 
+  staleValue () {
+    return (this.stale && this.cachePoint.get(this.staler)) || ''
+  }
+
+  /**
+   * update stale value
+   */
+  makeStale () {
+    if(!this.stale) return null
+    const staleValue = Utilities.getUuid()
+    this.cachePoint.put (this.staler, staleValue, this.expiry + 30)
   }
 
   /**
