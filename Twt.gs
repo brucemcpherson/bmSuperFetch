@@ -3,6 +3,8 @@
  * @typedef TwtApiOptions
  * @property {SuperFetch} superFetch a superfetch instance
  * @property {boolean} noCache whether to cache
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
  * @property {boolean} showUrl whether to showUrls when fetching
  * @property {object[]} extraParams always add these params
  * @property {number} max to 
@@ -18,12 +20,21 @@ class _TwtApi {
     const {
       noCache = true,
       superFetch,
+      staleKey = 'twt',
+      stale = true,
       showUrl = false,
       extraParams = [],
       max = 100,
       //  6 minutes
       maxWait = 60 * 6 * 1000
     } = {} = options
+
+    // get a new instance of superfetch
+    // replicating the settings, but adding whether to use stale/staleKey
+    this.superFetch = superFetch.ref({
+      stale,
+      staleKey
+    })
 
     // max number to get
     this.max = max
@@ -73,7 +84,7 @@ class _TwtApi {
       }
     }
     this.endPoint = `https://api.twitter.com/2`
-    this.proxy = superFetch.proxy({
+    this.proxy = this.superFetch.proxy({
       endPoint: this.endPoint,
       noCache,
       showUrl
@@ -198,17 +209,29 @@ class _TwtApi {
     superFetch = this.superFetch,
     showUrl = this.showUrl,
     extraParams = this.extraParams,
-    max = this.max
+    max = this.max,
+    stale = this.stale,
+    staleKey = this.staleKey
   } = {}) {
     return new _TwtApi({
       superFetch,
       noCache,
       showUrl,
       extraParams,
-      max
+      max,
+      stale,
+      staleKey
     })
   }
 
+  /**
+   * this is used to invalidate all cache entries
+   * subscribing to this.staleKey
+   * and should be issued after write operations
+   */
+  makeStale() {
+    return this.isCaching ? this.superFetch.makeStale() : null
+  }
   /**
    * this normalizes queries and combines strings and objects
    * for example query({ids: [1,2,3], query: [4,5]}).get([6,7])
@@ -425,7 +448,7 @@ class _TwtApi {
     }
     const maxWait = Utils.isNU(page.maxWait) ? this.maxWait : page.maxWait
     const max = Math.max(page.max - itemsSoFar, this.minChunk)
-    
+
     // pagesize needs to be a multiple of minChunk
     // set it to the nearest to max
     const pageSize = Math.min(maxChunk, Math.floor(((max - 1) + this.minChunk) / this.minChunk) * this.minChunk)
@@ -439,7 +462,7 @@ class _TwtApi {
   }
 
   get chunkIterator() {
-    return (arr,size=this.maxParams) => Utils.chunkIt(arr,size)
+    return (arr, size = this.maxParams) => Utils.chunkIt(arr, size)
   }
 
   makeListCacheKey({ url, page }) {
@@ -625,12 +648,12 @@ class _TwtApi {
    * @param {PackResponse.data} data
    * @return {PackResponse.data}
    */
-  packFlattener (data){
-    const result = data.reduce((p,c)=> {
+  packFlattener(data) {
+    const result = data.reduce((p, c) => {
       Array.prototype.push.apply(p.items, c.items)
       Array.prototype.push.apply(p.expansions, Utils.arrify(c.expansions))
       return p
-    },{
+    }, {
       items: [],
       expansions: []
     })
