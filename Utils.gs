@@ -297,6 +297,10 @@ const Utils = (() => {
   const isBlob = (blob) => isObject(blob) && blob.toString() === 'Blob'
   const isArray = (item) => Array.isArray(item)
   const isByteArray = (item) => isArray(item) && !isUndefined(item.byteLength)
+  const isNumber = (item) => typeof item === "number"
+  const isBoolean = (item) => typeof item === "boolean"
+  const isString = (item) => typeof item === "string"
+
   const papply = (item, itemToAdd) => {
     Array.prototype.push.apply(item, itemToAdd)
     return item
@@ -394,8 +398,31 @@ const Utils = (() => {
     return capacity
   }
 
+  const whichType = (item) => {
+    if (isNull(item)) return "null"
+    if (isNumber(item)) return "number"
+    if (isBoolean(item)) return "boolean"
+    if (isString(item)) return "string"
+    if (isBlob(item)) return "blob"
+    if (isByteArray(item)) return "byteArray"
+    if (isArray(item)) return "array"
+    if (isObject(item)) return "object"
+  }
+  const tob64 = (bytes) => {
+    return Utilities.base64Encode(bytes)
+  }
+  const fromb64 = (str) => {
+    return Utilities.base64Decode(str)
+  }
+  const stringFromB64 = (base64) => {
+    return Utilities.newBlob(fromb64(base64)).getDataAsString()
+  }
 
   return {
+    stringFromB64,
+    tob64,
+    fromb64,
+    whichType,
     roundUpCapacity,
     makeTankFiller,
     toBytes,
@@ -404,6 +431,9 @@ const Utils = (() => {
     isByteArray,
     isObject,
     isBlob,
+    isBoolean,
+    isNumber,
+    isString,
     chunkIt,
     makeThrow,
     chunker,
