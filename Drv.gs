@@ -11,6 +11,8 @@
  * @property {number} maxWait how long to wait max for rate limit probs
  * @property {number} max max number to return
  * @property {maxPost} max size of buffer to post in resumable upload
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
  */
 class _DrvApi {
   /**
@@ -20,11 +22,13 @@ class _DrvApi {
   constructor({
     superFetch,
     noCache = false,
+    staleKey = 'drv',
+    stale = true,
     base = '',
     includeItemsFromAllDrives = false,
     orderBy = "folder,name,modifiedTime desc",
     showUrl = false,
-    extraParams = [], 
+    extraParams = [],
     max = Infinity,
     //  6 minutes
     maxWait = 60 * 6 * 1000,
@@ -41,7 +45,10 @@ class _DrvApi {
       throw new Error('Max post must be multiple of 256k')
     }
     this.defaultCapacity = this.maxPost
-    this.superFetch = superFetch
+    this.superFetch = superFetch.ref({
+      stale,
+      staleKey
+    })
     this.extraParams = Utils.arrify(extraParams)
     this.base = base
     this.noCache = noCache
@@ -51,19 +58,19 @@ class _DrvApi {
     this.defaultFields = 'id,size,name,mimeType,md5Checksum'
     this.endPoint = `https://www.googleapis.com/drive/v3`
     // normal api endpoint
-    this.proxy = superFetch.proxy({
+    this.proxy = this.superFetch.proxy({
       endPoint: this.endPoint,
       noCache,
       showUrl
     })
     // special uploading endpoint
-    this.uploadProxy = superFetch.proxy({
+    this.uploadProxy = this.superFetch.proxy({
       endPoint: `https://www.googleapis.com/upload/drive/v3/files`,
       noCache,
       showUrl
     })
     // for when we have a complete url with no endpoint required
-    this.vanillaProxy = superFetch.proxy({
+    this.vanillaProxy = this.superFetch.proxy({
       endPoint: ``,
       noCache: true,
       showUrl
@@ -84,7 +91,9 @@ class _DrvApi {
     extraParams = this.extraParams,
     max = this.max,
     maxWait = this.maxWait,
-    maxPost = this.maxPost
+    maxPost = this.maxPost,
+    stale = this.stale,
+    staleKey = this.staleKey
   } = {}) {
     return new _DrvApi({
       superFetch,
@@ -96,8 +105,19 @@ class _DrvApi {
       base: Utils.combinePath(this.base, base),
       max,
       maxWait,
-      maxPost
+      maxPost,
+      stale,
+      staleKey
     })
+  }
+
+  /**
+   * this is used to invalidate all cache entries
+   * subscribing to this.staleKey
+   * and should be issued after write operations
+   */
+  makeStale() {
+    return this.isCaching ? this.superFetch.makeStale() : null
   }
 
   /**
@@ -254,7 +274,7 @@ class _DrvApi {
 
             // items will be released to the emptier in a controlled way by the tank as it fills
             emptier: (tank, items) => {
-              
+
               // do a chunk
               // it's possible that the
               const { start, result } = self.resumableUploadChunk({
@@ -300,9 +320,9 @@ class _DrvApi {
       readStream: ({ id, path, name } = {}, ...params) => {
         const self = this
         const stream = new _FakeStream()
-        
+
         // cant use cache for this
-        const {proxy} = this.ref('', {
+        const { proxy } = this.ref('', {
           noCache: true
         })
         // specific to write streams
@@ -785,6 +805,7 @@ class _DrvApi {
    * @return {PackResponse} 
    */
   setFile(meta) {
+    this.makeStale()
     return this.proxy(this.filesPath, {
       payload: JSON.stringify(meta),
       contentType: 'application/json',
@@ -1035,6 +1056,7 @@ class _DrvApi {
     }
 
     // make the request
+    this.makeStale()
     const r1 = this.uploadProxy(path, options)
     if (r1.error) return r1
 
@@ -1053,7 +1075,7 @@ class _DrvApi {
   }
 
   resumableStatus({ location, size }) {
-    size ="*"
+    size = "*"
     const result = this.vanillaProxy(location, {
       method: "PUT",
       headers: {
@@ -1069,7 +1091,7 @@ class _DrvApi {
     const headers = {
       "Content-Range": `bytes ${start}-${end}/${bytesLength || '*'}`
     }
-
+    this.makeStale()
     const result = this.vanillaProxy(location, {
       method: "PUT",
       payload: chunk,
@@ -1114,6 +1136,7 @@ class _DrvApi {
       const status = this.resumableStatus({ location, size: bytesLength })
       if (!status.error && !retainLocation) {
         // delete the resulmable link
+        this.makeStale()
         const delStatus = this.vanillaProxy(location, {
           method: "DELETE"
         })
@@ -1207,13 +1230,13 @@ class _DrvApi {
 
     const size = blob.getBytes().length
     const contentType = blob.getContentType()
-    const init = this._uploadInit({ 
-      path, 
-      name, 
-      metadata, 
-      size, 
-      contentType, 
-      createIfMissing 
+    const init = this._uploadInit({
+      path,
+      name,
+      metadata,
+      size,
+      contentType,
+      createIfMissing
     }, ...params)
     if (init.error) return init
 
