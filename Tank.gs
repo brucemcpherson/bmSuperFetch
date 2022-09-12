@@ -28,6 +28,7 @@
  * @property {function} emptier function to empty a tnk
  * @property {function} transformer function to transform a tank
  * @property {string} name the tank name (used for event reporting)
+ * @property {*} [context] anything you want passed to filler/emptier/transfomer
  */
 class _Tank {
 
@@ -46,7 +47,7 @@ class _Tank {
    * @param {TankOptions} params
    * @retutn {_Tank}
    */
-  constructor({ filler, emptier, transformer, capacity, name = 'tank' }) {
+  constructor({ filler, emptier, transformer, capacity, name = 'tank' , context}) {
     this.filler = filler
     this.capacity = capacity
     this.emptier = emptier
@@ -65,6 +66,7 @@ class _Tank {
     this._outTank = null
     this.name = name
     this.id = Utils.uuid()
+    this.context = context
 
     this.events = [
       'data',
@@ -334,7 +336,12 @@ class _Tank {
     })
     return this
   }
-
+  /**
+   * @return {TankReadings} the readings
+   */
+  get readings () {
+    return this._readings ('get-readings')
+  }
   /**
    * @param {string} eventName create a reading object for the given eventname
    * @return {TankReadings} the readings
@@ -541,7 +548,7 @@ class _Tank {
       return pack
     }
     this.emit('transformer-start')
-    const result = this.transformer(this, pack.items)
+    const result = this.transformer(this, pack)
     this.itemsTransformed = (result && result.items && result.items.length) || 0
     this.emit('transformer-end')
     if (result && result.error) {
