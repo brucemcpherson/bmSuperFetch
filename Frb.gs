@@ -6,6 +6,8 @@
  * @property {string} base the base path on the bucket (all paths will be relative to this)
  * @property {boolean} showUrl whether to showUrls when fetching
  * @property {object[]} extraParams always add these params
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
  */
 class _FrbApi {
   /**
@@ -18,15 +20,22 @@ class _FrbApi {
     base = '',
     superFetch,
     showUrl = false,
-    extraParams = []
+    extraParams = [],
+    staleKey = 'frb',
+    stale = true
   } = {}) {
     this.base = base
-    this.superFetch = superFetch
+    // get a new instance of superfetch
+    // replicating the settings, but adding whether to use stale/staleKey
+    this.superFetch = superFetch.ref({
+      stale,
+      staleKey
+    })
     this.dbName = dbName
     this.noCache = noCache
     this.extraParams = Utils.arrify(extraParams)
     this.showUrl = showUrl
-    this.proxy = superFetch.proxy({
+    this.proxy = this.superFetch.proxy({
       endPoint: `https://${this.dbName}.firebaseio.com`,
       noCache,
       showUrl
@@ -44,7 +53,9 @@ class _FrbApi {
     superFetch = this.superFetch,
     dbName = this.dbName,
     showUrl = this.showUrl,
-    extraParams = this.extraParams
+    extraParams = this.extraParams,
+    stale = this.stale,
+    staleKey = this.staleKey,
   } = {}) {
     return new _FrbApi({
       superFetch,
@@ -52,10 +63,22 @@ class _FrbApi {
       dbName,
       showUrl,
       extraParams,
-      base: Utils.singleSlash(this.base + (base ? '/' + base : ''))
+      base: Utils.singleSlash(this.base + (base ? '/' + base : '')),
+      stale,
+      staleKey
     })
   }
-
+  /**
+   * this is used to invalidate all cache entries
+   * subscribing to this.staleKey
+   * and should be issued after write operations
+   */
+  makeStale() {
+    return this.isCaching ? this.superFetch.makeStale() : null
+  }
+  get isCaching() {
+    return this.superFetch.cacher.cacheable && !this.noCache
+  }
   /**
    * path domain
    * @param {object} params
@@ -107,6 +130,7 @@ class _FrbApi {
 
   // set an item
   set({ path = '', data, method = "PUT" }, ...params) {
+    this.makeStale()
     return this.proxy(this.makePath({ path, params }), {
       method,
       payload: JSON.stringify(data)
