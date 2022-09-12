@@ -130,7 +130,6 @@ class _SuperFetch {
     })
     this.rottler = rottler
     this.missingPropertyIsFatal = missingPropertyIsFatal
-    console.log(this)
   }
 
   ref({
