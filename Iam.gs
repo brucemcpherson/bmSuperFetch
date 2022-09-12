@@ -5,6 +5,9 @@
  * @property {boolean} noCache whether to cache
  * @property {boolean} showUrl whether to showUrls when fetching
  * @property {object[]} extraParams always add these params
+ * @property {boolean} stale whether to use stale cache processing
+ * @property {string} staleKey key to use to get stale value
+ * @property {boolean} showUrl whether to showUrls when fetching
  */
 class _IamApi {
   /** 
@@ -20,14 +23,21 @@ class _IamApi {
     noCache = true,
     showUrl,
     extraParams = [],
-    base = ''
+    base = '',
+    staleKey = 'iam',
+    stale = true,
   }) {
     this.noCache = noCache
     this.showUrl = showUrl
     this.extraParams = Utils.arrify(extraParams)
     this.base = base
-    this.superFetch = superFetch
-    this.credentialsProxy = superFetch.proxy({
+    // get a new instance of superfetch
+    // replicating the settings, but adding whether to use stale/staleKey
+    this.superFetch = superFetch.ref({
+      stale,
+      staleKey
+    })
+    this.credentialsProxy = this.superFetch.proxy({
       endPoint: `https://iamcredentials.googleapis.com/v1`,
       noCache,
       showUrl
@@ -44,14 +54,18 @@ class _IamApi {
     superFetch = this.superFetch,
     noCache = this.noCache,
     showUrl = this.showUrl,
-    extraParams = this.extraParams
+    extraParams = this.extraParams,
+    stale = this.stale,
+    staleKey = this.staleKey
   } = {}) {
     return new _IamApi({
       superFetch,
       noCache,
       showUrl,
       extraParams,
-      base: Utils.singleSlash(this.base + (base ? '/' + base : ''))
+      base: Utils.singleSlash(this.base + (base ? '/' + base : '')),
+      stale,
+      staleKey
     })
   }
   /**
@@ -94,6 +108,7 @@ class _IamApi {
               contentType: "application/json",
               payload: JSON.stringify(body)
             }
+            self.makeStale()
             return self.credentialsProxy(self.makeTokenServicePath({
               serviceAccountEmail,
               type: 'generateIdToken'
@@ -105,6 +120,17 @@ class _IamApi {
       }
     }
     return tokens
+  }
+  /**
+ * this is used to invalidate all cache entries
+ * subscribing to this.staleKey
+ * and should be issued after write operations
+ */
+  makeStale() {
+    return this.isCaching ? this.superFetch.makeStale() : null
+  }
+  get isCaching() {
+    return this.superFetch.cacher.cacheable && !this.noCache
   }
   /**
    * make path to access credential generator
