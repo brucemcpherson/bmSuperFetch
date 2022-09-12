@@ -5,7 +5,7 @@ const Pager = (() => {
     // if we're  even doing cache here and we're not restarting a depage
     // its not ok to have caching turned on if there was an attempt to provide 
     // a pageToken
-    
+
     if (pluginInstance.isCaching) {
 
       if (!Utils.isUndefined(page.pageToken)) {
@@ -87,10 +87,49 @@ const Pager = (() => {
     return ob
   }
 
+
+
+  const tankingPager = ({
+    getter,
+    extractor,
+    tokenFinder,
+    maxChunk,
+    finalizer,
+    page
+  }) => {
+    // the tank functions have access to this to build up the final result
+    const context = {
+
+      // this is how to get the next item
+      getter,
+
+      // the very last result will go here
+      result: null,
+
+      // gets data out of the packresponse wherever it is, and returns what should be store in items
+      extractor,
+
+      // the sump to store final results in
+      items: [],
+
+      // find the next page token
+      tokenFinder,
+
+      maxChunk,
+
+      // handle paging
+      page,
+
+      finalizer
+    }
+
+    return new _Tanking({ context })
+  }
   return {
     localPager,
     cacheDetect,
-    getter
+    getter,
+    tankingPager
   }
 
 })()
