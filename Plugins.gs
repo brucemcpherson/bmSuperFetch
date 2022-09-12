@@ -37,6 +37,15 @@ var Plugins = {
   },
   get Smg () {
     return _SmgApi
+  },
+  get ValuePacker() {
+    return _ValuePacker
+  },
+  get Helpers () {
+    return Utils
+  },
+  get Oau () {
+    return _OauApi
   }
 
 }
