@@ -193,6 +193,34 @@ class _TwtApi {
           muting: {
             ...basicFollow,
             path: `${base}/:id/muting`,
+          },
+          tweets: {
+            ...basicFollow,
+            path: `${base}/:id/tweets`,
+          },
+          likedTweets: {
+            ...basicFollow,
+            path: `${base}/:id/liked_tweets`,
+          },
+          listMemberships: {
+            ...basicFollow,
+            path: `${base}/:id/list_memberships`,
+          },
+          mentions: {
+            ...basicFollow,
+            path: `${base}/:id/mentions`,
+          },
+          ownedLists: {
+            ...basicFollow,
+            path: `${base}/:id/owned_lists`,
+          },
+          pinnedLists: {
+            ...basicFollow,
+            path: `${base}/:id/pinned_lists`,
+          },
+          bookmarks: {
+            ...basicFollow,
+            path: `${base}/:id/bookmarks`,
           }
         }
       }
@@ -392,7 +420,14 @@ class _TwtApi {
         ...getClosuringId({ type: 'following', agenda, extraId, fields, page }),
         ...getClosuringId({ type: 'muting', agenda, extraId, fields, page }),
         ...getClosuringId({ type: 'blocking', agenda, extraId, fields, page }),
-        ...getClosuringId({ type: 'followers', agenda, extraId, fields, page })
+        ...getClosuringId({ type: 'followers', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'tweets', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'likedTweets', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'listMemberships', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'mentions', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'ownedLists', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'pinnedLists', agenda, extraId, fields, page }),
+        ...getClosuringId({ type: 'bookmarks', agenda, extraId, fields, page })
       }
     }
 
@@ -581,7 +616,7 @@ class _TwtApi {
           result.error = 'Unexpected cached result in search operation'
         } else {
           // standardized this odd twitter response
-          Array.prototype.push.apply(pager.items, Utils.arrify(result.data.data))
+          Array.prototype.push.apply(pager.items, Utils.arrify( result.data.data))
           Array.prototype.push.apply(pager.expansions,
             Utils.arrify(Object.keys(result.data)
               .filter(f => f != 'data' && f !== 'meta')
